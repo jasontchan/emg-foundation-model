@@ -9,9 +9,9 @@ from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 import matplotlib as plt
 import seaborn as sns
 
-from create_latents import create_linspace_latent_tokens, create_output_queries
+from utilities import create_linspace_latent_tokens, create_output_queries
 from model import Model
-from spike_token_dataset import SpikeTokenDataset
+from spike_dataset import SpikeDataset
 
 
 class Trainer:
@@ -222,8 +222,8 @@ if __name__ == "__main__":
     val_data = data[val_indices]
 
     # print("training_data", training_data)
-    train_spike_token_data = SpikeTokenDataset(training_data)
-    val_spike_token_data = SpikeTokenDataset(val_data)
+    train_spike_token_data = SpikeDataset(training_data)
+    val_spike_token_data = SpikeDataset(val_data)
 
     sample_item = train_spike_token_data[0]
     print("Sample item from dataset:")
@@ -235,13 +235,13 @@ if __name__ == "__main__":
         train_spike_token_data,
         batch_size=64,
         shuffle=True,
-        collate_fn=SpikeTokenDataset.collate_fn,
+        collate_fn=SpikeDataset.collate_fn,
     )
     val_loader = DataLoader(
         val_spike_token_data,
         batch_size=64,
         shuffle=True,
-        collate_fn=SpikeTokenDataset.collate_fn,
+        collate_fn=SpikeDataset.collate_fn,
     )
 
     # need parameters 'num_embeddings', 'embedding_dim', 'num_buckets', 'num_latents', and 'latent_dim'

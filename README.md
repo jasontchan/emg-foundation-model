@@ -1,1 +1,1 @@
-# t minus 17 days
+# t minus 10 days
