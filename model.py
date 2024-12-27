@@ -20,8 +20,8 @@ class Model(nn.Module):
         embedding_dim,
         num_latents,
         latent_dim,
+        num_classes,
         dropout=0.1,
-        num_classes=6,
     ):
         super().__init__()
 
@@ -30,24 +30,6 @@ class Model(nn.Module):
         self.embedding_dim = embedding_dim
         self.num_classes = num_classes
 
-        # create latents
-        # self.latent = nn.Parameter(
-        #     nn.init.trunc_normal_(
-        #         torch.zeros((num_latents, 1, embedding_dim)),
-        #         mean=0,
-        #         std=0.02,
-        #         a=-2,
-        #         b=2,
-        #     )
-        # )
-
-        # create embedding object
-        # self.input_embedding = HashEmbedding(
-        #     num_embeddings=num_embeddings,
-        #     embedding_dim=embedding_dim,
-        #     num_buckets=num_buckets,
-        #     seed=0,
-        # )
         self.input_embedding = InfiniteVocabEmbedding(embedding_dim=embedding_dim)
         self.input_embedding.load_state_dict(torch.load('data/infinite_vocab_embedding.pt'))
         self.input_embedding.extend_vocab(torch.tensor([0.0, 0.0, 0.0, 0.0]))
@@ -68,9 +50,12 @@ class Model(nn.Module):
             atn_dropout=dropout,
         )
 
+        # (A) Learned classification query (shape: [dim])
+        self.class_query = nn.Parameter(torch.randn(embedding_dim))
+
         self.layer_norm = nn.LayerNorm(embedding_dim)
 
-        self.readout = nn.Linear(embedding_dim, 6)  # predictions + loss
+        self.readout = nn.Linear(embedding_dim, self.num_classes)  # predictions + loss
         self.dim = embedding_dim  # double check d
 
     def create_padding_mask(  # TODO: consider moving this to utilities?
@@ -105,10 +90,14 @@ class Model(nn.Module):
         latents = self.latent_embedding(latent_idx) #size [n_latents, lat_emb_dim]
         latents = latents.unsqueeze(0).expand(batch_size, -1, -1) #size [batch_size, n_latents, lat_emb_dim]
         latent_timestamps = latent_timestamps.unsqueeze(0).expand(batch_size, -1)
-        # create output queries
-        output_timestamps, output_queries = create_output_queries(
-            1.0, 1, batch_size, self.embedding_dim #max time 1.0, n_output queries = 1 (classification), b, dim
-        )
+        # # create output queries
+        # output_timestamps, output_queries = create_output_queries(
+        #     1.0, 1, batch_size, self.embedding_dim #max time 1.0, n_output queries = 1 (classification), b, dim
+        # )
+        output_queries = self.class_query.unsqueeze(0).unsqueeze(1).expand(batch_size, 1, -1)
+        output_timestamps = torch.tensor([1.0 for _ in range(batch_size)])
+        output_timestamps = output_timestamps.unsqueeze(1)
+
 
         # run through perceiverIO and return loss
         output_latents = self.perceiver_io(
@@ -124,12 +113,12 @@ class Model(nn.Module):
             output_query_seqlen=torch.ones_like(sequence_lengths),
         )
         output_latents = self.layer_norm(output_latents)
-
         predictions = self.readout(output_latents).squeeze(1)
-
+        print("PREDICTIONS", predictions)
         loss = None
         if labels is not None:
-            loss = F.cross_entropy(predictions, labels)
+            print("LABELS", labels)
+            loss = F.cross_entropy(predictions, labels.long())
 
         return predictions, loss
 
@@ -154,24 +143,24 @@ class Model(nn.Module):
         )
         return F.softmax(predictions, dim=-1)
 
-    @staticmethod
-    def collate_fn(batch): #NOTE: why do i have another collate function here ....? looks like its not being used ok
-        """
-        Custom collate function for handling variable length sequences in DataLoader.
+    # @staticmethod
+    # def collate_fn(batch): #NOTE: why do i have another collate function here ....? looks like its not being used ok
+    #     """
+    #     Custom collate function for handling variable length sequences in DataLoader.
 
-        Args:
-            batch: List of tensors with variable lengths
+    #     Args:
+    #         batch: List of tensors with variable lengths
 
-        Returns:
-            Padded batch tensor and sequence lengths
-        """
-        # Sort batch by sequence length (descending)
-        batch.sort(key=lambda x: x.size(0), reverse=True)
+    #     Returns:
+    #         Padded batch tensor and sequence lengths
+    #     """
+    #     # Sort batch by sequence length (descending)
+    #     batch.sort(key=lambda x: x.size(0), reverse=True)
 
-        # Get sequence lengths
-        lengths = torch.tensor([x.size(0) for x in batch])
+    #     # Get sequence lengths
+    #     lengths = torch.tensor([x.size(0) for x in batch])
 
-        # Pad sequences
-        padded = torch.nn.utils.rnn.pad_sequence(batch, batch_first=True)
+    #     # Pad sequences
+    #     padded = torch.nn.utils.rnn.pad_sequence(batch, batch_first=True)
 
-        return padded, lengths
+    #     return padded, lengths

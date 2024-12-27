@@ -139,14 +139,14 @@ class PerceiverRotary(nn.Module):
         latents = latents + self.enc_ffn(latents)
         print(
             "latents size:", latents.size()
-        )  # is it ok this is [64, 256, 256], shouldnt it be [32, 8, inner dim]?
-        mask = np.ones(tuple(latents.size()), dtype=bool)
+        )
+        # mask = np.ones(tuple(latents.size()), dtype=bool)
         # self attention layers
         for self_attn, self_ff in self.proc_layers:
             latents = latents + self.dropout(
                 self_attn(
-                    latents, latent_timestamp_emb, x_mask=mask
-                )  # TODO: INPUT X MASK HERE INSTEAD OF X SEQLEN
+                    latents, latent_timestamp_emb, x_mask=None
+                )
             )
             latents = latents + self.dropout(self_ff(latents))
 
@@ -159,9 +159,9 @@ class PerceiverRotary(nn.Module):
             latents,
             output_timestamp_emb,
             latent_timestamp_emb,
-            context_mask=None,  # check this
-            query_seqlen=output_query_seqlen,
-            context_seqlen=latent_seqlen,
+            context_mask=None,  # check this (i think this is fine bc all queries are valid; uniform yj)
+            # query_seqlen=output_query_seqlen,
+            # context_seqlen=latent_seqlen,
         )
         output_queries = output_queries + self.dec_ffn(output_queries)
 

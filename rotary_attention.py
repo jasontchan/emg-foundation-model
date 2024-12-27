@@ -32,68 +32,23 @@ class RotaryCrossAttention(nn.Module):
         rotary_time_emb_context,
         context_mask,
     ):
-
-        # normalize and calc k, q and v
-        # q = self.to_q(x_query)
-        # k, v = self.to_kv(x_context).chunk(2, dim=-1)
-
-        # x_context = self.norm_context(x_context)
-        # x_query = x_query.unsqueeze(0)
-        # q = q.unsqueeze(0)
-
-        # x_context = x_context.reshape(
-        #     batch_size, x_context.size(1) * x_context.size(2), -1
-        # )
-
-        # # For k, v: flatten seq_len and features
-        # k = k.reshape(
-        #     batch_size, k.size(1) * k.size(2), -1
-        # )  # [batch_size, seq_len * features, inner_dim (num_heads * dim_heads)] features = 4
-        # v = v.reshape(
-        #     batch_size, v.size(1) * v.size(2), -1
-        # )  # [batch_size, seq_len * features, inner_dim (num_heads * dim_heads)]
-
+        # normalize and project to q, k, v
         x_query = self.norm(x_query)
         x_context = self.norm_context(x_context)
-        batch_size = x_context.size(0)
+
         q = self.to_q(x_query)
-        q = q.unsqueeze(0).repeat(batch_size, 1, 1)
         k, v = self.to_kv(x_context).chunk(2, dim=-1)
 
-        k = k.reshape(
-            batch_size, k.size(1) * k.size(2), -1
-        )  # [batch_size, seq_len * features, inner_dim (num_heads * dim_heads)] features = 4
-        v = v.reshape(
-            batch_size, v.size(1) * v.size(2), -1
-        )  # [batch_size, seq_len * features, inner_dim (num_heads * dim_heads)]
-
-        print("x query:", x_query, "x_context:", x_context, "q:", q, "k:", k, "v:", v)
-        print(
-            "SHAPES:",
-            "x query:",
-            x_query.size(),
-            "x_context:",
-            x_context.size(),
-            "q:",
-            q.size(),
-            "k:",
-            k.size(),
-            "v:",
-            v.size(),
-        )
         out = rotary_default_attention(
-            q=q,
-            k=k,
-            v=v,
-            rotary_time_emb_q=rotary_time_emb_query,
+            q=q, k=k, v=v,
+            rotary_time_emb_q=rotary_time_emb_query, 
             rotary_time_emb_kv=rotary_time_emb_context,
             num_heads=self.heads,
             dropout_p=self.dropout if self.training else 0,
             rotate_value=self.rotate_value,
             kv_mask=context_mask,
         )
-        print("SHAPE OF OUT", out.size())
-        # out = rearrange(out, "b h n d -> b n (h d)")
+        
         out = self.to_out(out)
         return out
 
@@ -141,9 +96,6 @@ class RotarySelfAttention(nn.Module):
             "v:",
             v.size(),
         )
-        rotary_time_emb = rotary_time_emb.unsqueeze(0).unsqueeze(
-            0
-        )  # [1, 1, seq_len, dim]
         out = rotary_default_attention(
             q=q,
             k=k,
@@ -172,7 +124,11 @@ def rotary_default_attention(
     kv_mask=None,  # (b, n_kv)
 ):  # Output: (b, n, (h d), )
     r"""Wraps the default attention implementation with rotary embedding application."""
-
+    print("q size", q.size())
+    print("k size", k.size())
+    print("v size", v.size())
+    print("rotary_time_emb_q size", rotary_time_emb_q.size())
+    print("rotary_time_emb_kv size", rotary_time_emb_kv.size())
     # default attention expects shape b h n d
     q = rearrange(q, "b n (h d) -> b h n d", h=num_heads)
     k = rearrange(k, "b n (h d) -> b h n d", h=num_heads)
@@ -189,7 +145,11 @@ def rotary_default_attention(
     # attention mask
     if kv_mask is not None:
         kv_mask = rearrange(kv_mask, "b n -> b () () n")
-        kv_mask = kv_mask.repeat(1, 1, 1, 4)
+
+    print("BEFORE DPA:")
+    print("q size:", q.size())
+    print("k size", k.size())
+    print("v size", v.size())
     # perform attention, by default will use the optimal attention implementation
     out = F.scaled_dot_product_attention(
         q,
@@ -198,16 +158,15 @@ def rotary_default_attention(
         attn_mask=kv_mask,
         dropout_p=dropout_p,
     )
-    print("SHAPE OF OUT", out.size())
 
     if rotate_value:
         out = apply_rotary_pos_emb(-rotary_time_emb_q, out, dim=1)
 
     # return (b, n, (h d), )
-    # out = rearrange(out, "b h n d -> b n (h d)")
+    out = rearrange(out, "b h n d -> b n (h d)")
     # print("rearranged !!!! now shape is", out.size())
     # out = rearrange(out, "b n s d -> b s n d")  # Reorder dimensions first
     # out = rearrange(out, "b s n d -> b s (n d)")  # Then combine n and d
-    out = out.mean(dim=2)
-    print("out size", out.size())
+    # out = out.mean(dim=2)
+    # print("out size", out.size())
     return out

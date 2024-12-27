@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
-import matplotlib as plt
+import matplotlib.pyplot as plt
 import seaborn as sns
 
 from utilities import create_linspace_latent_tokens, create_output_queries
@@ -118,7 +118,7 @@ class Trainer:
                 sequence_lengths=lengths,
                 time_stamps=timestamps,
                 latent_timestamps=self.latent_timestamps,
-                output_timestamps=None,
+                latent_idx=self.latent_idx,
                 labels=labels,
             )
 
@@ -149,6 +149,7 @@ class Trainer:
         plt.title("Confusion Matrix")
         plt.ylabel("True Label")
         plt.xlabel("Predicted Label")
+        plt.savefig('confusion_mat.png')
         plt.close()
 
     def train(self, n_epochs):
@@ -235,15 +236,14 @@ if __name__ == "__main__":
         embedding_dim=embedding_dim,
         num_latents=256,
         latent_dim=256,
+        num_classes=len(list(stage_idx.values())),
     )
-
-
     # Initialize trainer
     trainer = Trainer(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
-        gesture_names=list(stage_idx.values()), #NOTE: can change to keys if this is allowed to be strings
+        gesture_names=list(stage_idx.values()),
         learning_rate=1e-4,
         weight_decay=0.01,
     )
