@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from hash_embedding import HashEmbedding
 from perceiver_rotary import PerceiverRotary
 from utilities import create_output_queries
+from infinite_embedding import InfiniteVocabEmbedding
 
 
 class Model(nn.Module):
@@ -43,12 +44,13 @@ class Model(nn.Module):
         # )
 
         # create embedding object
-        self.input_embedding = HashEmbedding(
-            num_embeddings=num_embeddings,
-            embedding_dim=embedding_dim,
-            num_buckets=num_buckets,
-            seed=0,
-        )
+        # self.input_embedding = HashEmbedding(
+        #     num_embeddings=num_embeddings,
+        #     embedding_dim=embedding_dim,
+        #     num_buckets=num_buckets,
+        #     seed=0,
+        # )
+        self.input_embedding = InfiniteVocabEmbedding(embedding_dim=embedding_dim)
         self.latent_embedding = nn.Embedding(num_latents, embedding_dim=embedding_dim)
 
         self.dropout = nn.Dropout(dropout)
@@ -99,8 +101,28 @@ class Model(nn.Module):
             sequence_lengths=sequence_lengths, max_length=max_seq_len
         )
         print("LATENT TIMESTAMPS IN MODEL", latent_timestamps)
-        # run embedding on data
-        inputs = self.input_embedding(data)  # (batch_size, max_seq_len, embedding_dim)
+
+
+        # run embedding on data w infinite vocab embedding
+
+
+        '''
+        if infinite embedding table not initialized (is_lazy()), initialize it w this batch
+        call embedding.extend_vocab(new tokens) #note: wont reinitialize embeddings for existing tokens
+        tokenize all tokens by 
+        indices = embedding.tokenizer(tokens)
+        input_indices = torch.tensor([indices])
+        inputs = self.input_embedding(input_indices)
+        '''
+        if self.input_embedding.is_lazy():
+            print("initializing input embedding")
+            self.input_embedding.initialize_vocab(data)
+        else:
+            self.input_embedding.extend_vocab(data)
+        indices = self.input_embedding.tokenizer(data)
+        input_indices = torch.tensor([indices])
+        inputs = self.input_embedding(input_indices)  # (batch_size, max_seq_len, embedding_dim)
+        print("INPUT TENSOR SIZES", inputs.size())
         inputs = self.dropout(inputs)
 
         latents = self.latent_embedding(latent_idx)

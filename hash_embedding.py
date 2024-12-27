@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+#lowkey gonna use infinite instead of hash rn ok bye
 #why do we use hash embedding instead of normal embedding again?
 class HashEmbedding(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, num_buckets=None, seed=0):

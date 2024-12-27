@@ -186,9 +186,15 @@ class Trainer:
 
 if __name__ == "__main__":
 
-    with open("data_collection/data/spike_data/all_spikes.pickle", "rb") as file:
+    with open("data/all_spikes.pickle", "rb") as file:
         all_spikes = pickle.load(file)
-
+    # print(all_spikes)
+    with open("data/session_idx.pickle", "rb") as file:
+        session_idx = pickle.load(file)
+    with open("data/stage_idx.pickle", "rb") as file:
+        stage_idx = pickle.load(file)
+    with open("data/subject_idx.pickle", "rb") as file:
+        subject_idx = pickle.load(file)
     all_times = torch.tensor([dict["time"] for dict in all_spikes])
     all_sessions = torch.tensor([dict["session"] for dict in all_spikes])
     all_subjects = torch.tensor([dict["subject"] for dict in all_spikes])
@@ -231,15 +237,16 @@ if __name__ == "__main__":
     print("Length:", len(sample_item))
     print("Contents:", sample_item)
 
+    print("amount of data in training", len(train_spike_token_data))
     train_loader = DataLoader(
         train_spike_token_data,
-        batch_size=64,
+        batch_size=3, #NOTE: this is for the small dataset poc
         shuffle=True,
         collate_fn=SpikeDataset.collate_fn,
     )
     val_loader = DataLoader(
         val_spike_token_data,
-        batch_size=64,
+        batch_size=3,
         shuffle=True,
         collate_fn=SpikeDataset.collate_fn,
     )
@@ -253,24 +260,25 @@ if __name__ == "__main__":
         latent_dim=32,
     )
 
-    # Initialize trainer
-    trainer = Trainer(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        gesture_names=[0, 1, 2, 3, 4, 5],
-        learning_rate=1e-4,
-        weight_decay=0.01,
-    )
 
-    # Train model
-    trainer.train(n_epochs=100)
+    # # Initialize trainer
+    # trainer = Trainer(
+    #     model=model,
+    #     train_loader=train_loader,
+    #     val_loader=val_loader,
+    #     gesture_names=list(stage_idx.values()), #NOTE: can change to keys if this is allowed to be strings
+    #     learning_rate=1e-4,
+    #     weight_decay=0.01,
+    # )
 
-    # Make predictions
-    # test_predictions, test_confidences = trainer.predict(_loader)
+    # # Train model
+    # trainer.train(n_epochs=100)
 
-    # Print some predictions with their confidence
-    # for pred, conf in zip(test_predictions[:5], test_confidences[:5]):
-    #     print(
-    #         f"Predicted gesture: {trainer.gesture_names[pred]} with confidence: {conf:.4f}"
-    #     )
+    # # Make predictions
+    # # test_predictions, test_confidences = trainer.predict(_loader)
+
+    # # Print some predictions with their confidence
+    # # for pred, conf in zip(test_predictions[:5], test_confidences[:5]):
+    # #     print(
+    # #         f"Predicted gesture: {trainer.gesture_names[pred]} with confidence: {conf:.4f}"
+    # #     )
