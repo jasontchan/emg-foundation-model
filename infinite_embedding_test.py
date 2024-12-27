@@ -7,7 +7,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.nn.parameter import UninitializedParameter
-import numpy as np
 
 
 class InfiniteVocabEmbedding(nn.Module):
@@ -65,7 +64,7 @@ class InfiniteVocabEmbedding(nn.Module):
             self._hook_vocab_on_load_state_dict, with_module=False
         )
 
-    def initialize_vocab(self, vocab: List[torch.Tensor]):
+    def initialize_vocab(self, vocab: List[str]):
         r"""Initialize the vocabulary with a list of words. This method should be called
         only once, and before the model is trained. If you would like to add new words
         to the vocabulary, use :obj:`extend_vocab()` instead.
@@ -95,18 +94,23 @@ class InfiniteVocabEmbedding(nn.Module):
         ), f"Vocabulary already initialized, and has {len(self.vocab)} words. "
         "If you want to add new words to the vocabulary, use extend_vocab() instead."
 
-        # Create a mapping from tensor words to indices
-        unique_vocab = []
-        for tensor in vocab:
-            if not any(tensor == existing for existing in unique_vocab):
-                unique_vocab.append(tuple(round(val, 2) for val in tensor.clone().detach().tolist()))
-        print("unique vocab", unique_vocab)
-        self.vocab = OrderedDict(
-            (tensor, idx) for idx, tensor in enumerate(unique_vocab)
-        )
+        # Create a mapping from words to indices
+        if isinstance(vocab, str):
+            raise ValueError("vocab cannot be a single string")
+        elif isinstance(vocab, Iterable):
+            # OmegaConf wraps the list in omageconf.listconfig.ListConfig
+            vocab = list(set([self._turn_into_str_rep(token) for token in vocab]))
+            self.vocab = OrderedDict(zip(vocab, range(1, len(vocab) + 1)))
+            # print("self.vocab", self.vocab)
+            assert "NA" not in self.vocab, "NA is a reserved word"
+            self.vocab["NA"] = 0
+            self.vocab.move_to_end("NA", last=False)
+        else:
+            raise ValueError("vocab must be a list or dict")
+
         self.initialize_parameters(len(self.vocab))
 
-    def extend_vocab(self, vocab: List[torch.Tensor], exist_ok=False):
+    def extend_vocab(self, vocab: List[str], exist_ok=False):
         r"""Extend the vocabulary with a list of words. If a word already exists in the
         vocabulary, an error will be raised. The embeddings for the new words will be
         initialized randomly, and new ids will be assigned to the new words.
@@ -137,39 +141,47 @@ class InfiniteVocabEmbedding(nn.Module):
         """
         if self.is_lazy():
             raise ValueError("No vocabulary was initialized. Use initialize_vocab()")
-
+        if vocab.dim() == 1:
+            vocab = [self._turn_into_str_rep(vocab)]
+        else:
+            vocab = [self._turn_into_str_rep(token) for token in vocab]
         # find intersection and difference between key sets
-        new_entries = []
-        for tensor in vocab:
-            if not any(tuple(torch.round(tensor.clone().detach(), decimals=2).tolist()) == key for key in self.vocab.keys()):
-                new_entries.append(tuple(torch.round(tensor.clone().detach(), decimals=2).tolist()))
+        new_words, existing_words = [], []
+        for word in vocab:
+            if word not in self.vocab:
+                new_words.append(word)
+            else:
+                existing_words.append(word)
 
-        if not exist_ok and len(new_entries) < len(vocab):
+        if not exist_ok and len(existing_words) > 0:
             raise ValueError(
-                f"Vocabulary already contains some"
+                f"Vocabulary already contains {len(existing_words)} out of {len(vocab)}"
                 f" words that are being added. You can skip this error by setting "
                 f"exist_ok=True, but be aware that the embeddings for these existing "
                 f"words won't be re-initialized."
             )
 
-        # # update tokenizer
-        # self.vocab.update(
-        #     OrderedDict(
-        #         zip(vocab, range(len(self.vocab), len(self.vocab) + len(vocab)))
-        #     )
-        # )
-        #update vocab
-        for tensor in new_entries:
-            self.vocab[tensor] = len(self.vocab)
+        # update tokenizer
+        self.vocab.update(
+            OrderedDict(
+                zip(new_words, range(len(self.vocab), len(self.vocab) + len(new_words)))
+            )
+        )
 
-        # expand weight matrix
-        existing_embeddings = self.weight.clone().detach()
+        # make a copy of existing embeddings
+        embeddings_for_existing_words = self.weight.clone().detach()
+
+        # reinitalize weight matrix after extending it
         self.weight = UninitializedParameter()
         self.initialize_parameters(len(self.vocab))
-        self.weight.data[: existing_embeddings.size(0)] = existing_embeddings
+
+        # copy existing embeddings into new weight matrix
+        self.weight.data[
+            : len(embeddings_for_existing_words)
+        ] = embeddings_for_existing_words
         return self
 
-    def subset_vocab(self, vocab: List[torch.Tensor], inplace=True):
+    def subset_vocab(self, vocab: List[str], inplace=True):
         r"""Select a subset of the vocabulary. The embeddings for the selected words
         will be copied from the original embeddings, and the ids for the selected words
         will be updated accordingly.
@@ -202,7 +214,7 @@ class InfiniteVocabEmbedding(nn.Module):
         """
         if self.is_lazy():
             raise ValueError("No vocabulary was initialized. Use initialize_vocab()")
-
+        vocab = [self._turn_into_str_rep(token) for token in vocab]
         assert len(vocab) > 0, "Vocabulary must contain at least one word."
 
         # find intersection and difference between key sets
@@ -232,8 +244,8 @@ class InfiniteVocabEmbedding(nn.Module):
             new_embedding.weight.data = embeddings_for_selected_words
             return new_embedding
 
-    def tokenizer(self, words):
-        r"""Convert a word or a tensor of words to their token indices.
+    def tokenizer(self, words: Union[str, List[str]]):
+        r"""Convert a word or a list of words to their token indices.
         
         Args:
             words (Union[str, List[str]]): A word or a list of words.
@@ -256,11 +268,12 @@ class InfiniteVocabEmbedding(nn.Module):
                 embedding.tokenizer(["apple", "cherry", "apple"])
                 >>> [1, 3, 1]
         """
-        print(self.vocab)
         if words.dim() == 1: #is a single tensor-- just one word
-            return self.vocab[tuple(torch.round(words.clone().detach(), decimals=2).tolist())]
-        else: #is a tensor w multiple words
-            return [self.vocab[tuple(torch.round(tensor.clone().detach(), decimals=2).tolist())] for tensor in words]
+            words = self._turn_into_str_rep(words)
+            return self.vocab[words]
+        else: #multiple tokens in a tensor
+            words = [self._turn_into_str_rep(token) for token in words]
+            return [self.vocab[w] for w in words]
 
     def detokenizer(self, index: int):
         r"""Convert a token index to a word.
@@ -319,6 +332,9 @@ class InfiniteVocabEmbedding(nn.Module):
             with torch.no_grad():
                 self.weight.materialize((num_embeddings, self.embedding_dim))
                 self.reset_parameters()
+    def _turn_into_str_rep(self, token): #token is a torch.tensor()
+        token = token.cpu()
+        return " ".join(f"{x:.5g}" for x in token.numpy())
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         if self.is_lazy():

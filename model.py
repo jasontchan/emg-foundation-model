@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from hash_embedding import HashEmbedding
 from perceiver_rotary import PerceiverRotary
 from utilities import create_output_queries
-from infinite_embedding import InfiniteVocabEmbedding
+from infinite_embedding_test import InfiniteVocabEmbedding
 
 
 class Model(nn.Module):
@@ -17,9 +17,7 @@ class Model(nn.Module):
 
     def __init__(
         self,
-        num_embeddings,
         embedding_dim,
-        num_buckets,
         num_latents,
         latent_dim,
         dropout=0.1,
@@ -51,7 +49,9 @@ class Model(nn.Module):
         #     seed=0,
         # )
         self.input_embedding = InfiniteVocabEmbedding(embedding_dim=embedding_dim)
-        self.latent_embedding = nn.Embedding(num_latents, embedding_dim=embedding_dim)
+        self.input_embedding.load_state_dict(torch.load('data/infinite_vocab_embedding.pt'))
+        self.input_embedding.extend_vocab(torch.tensor([0.0, 0.0, 0.0, 0.0]))
+        self.latent_embedding = nn.Embedding(num_latents, embedding_dim=latent_dim)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -93,48 +93,21 @@ class Model(nn.Module):
         labels=None,
         # output_batch_index
     ):
-
-        # batch_size = output_batch_index.max().item() + 1
         batch_size = data.size(0)
         max_seq_len = data.size(1)
         padding_mask = self.create_padding_mask(
             sequence_lengths=sequence_lengths, max_length=max_seq_len
         )
-        print("LATENT TIMESTAMPS IN MODEL", latent_timestamps)
-
-
-        # run embedding on data w infinite vocab embedding
-
-
-        '''
-        if infinite embedding table not initialized (is_lazy()), initialize it w this batch
-        call embedding.extend_vocab(new tokens) #note: wont reinitialize embeddings for existing tokens
-        tokenize all tokens by 
-        indices = embedding.tokenizer(tokens)
-        input_indices = torch.tensor([indices])
-        inputs = self.input_embedding(input_indices)
-        '''
-        if self.input_embedding.is_lazy():
-            print("initializing input embedding")
-            self.input_embedding.initialize_vocab(data)
-        else:
-            self.input_embedding.extend_vocab(data)
-        indices = self.input_embedding.tokenizer(data)
-        input_indices = torch.tensor([indices])
-        inputs = self.input_embedding(input_indices)  # (batch_size, max_seq_len, embedding_dim)
-        print("INPUT TENSOR SIZES", inputs.size())
+        indices = torch.tensor([[self.input_embedding.tokenizer(sequence)] for sequence in data])
+        inputs = self.input_embedding(indices)  # (batch_size, 1(?), max_seq_len, embedding_dim)
+        inputs = inputs.squeeze(1) #get rid of singleton dimension so its size [batch_size, max_seq_len, embedding_dim]
         inputs = self.dropout(inputs)
-
-        latents = self.latent_embedding(latent_idx)
-
-        # output_queries = torch.zeros(
-        #     (batch_size, 1, self.embedding_dim),
-        #     # device=inputs.device,
-        #     # dtype=inputs.dtype
-        # )
+        latents = self.latent_embedding(latent_idx) #size [n_latents, lat_emb_dim]
+        latents = latents.unsqueeze(0).expand(batch_size, -1, -1) #size [batch_size, n_latents, lat_emb_dim]
+        latent_timestamps = latent_timestamps.unsqueeze(0).expand(batch_size, -1)
         # create output queries
         output_timestamps, output_queries = create_output_queries(
-            3, 32, batch_size, self.embedding_dim
+            1.0, 1, batch_size, self.embedding_dim #max time 1.0, n_output queries = 1 (classification), b, dim
         )
 
         # run through perceiverIO and return loss

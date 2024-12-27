@@ -33,13 +33,11 @@ def create_output_queries(max_time, num_queries, batch_size, embedding_dim):
     timestamps = torch.linspace(0, max_time, num_queries)
     timestamps = timestamps.unsqueeze(0).repeat(batch_size, 1)
     output_queries = torch.zeros(
-        (batch_size, 1, embedding_dim),
+        (batch_size, num_queries, embedding_dim),
         # device=inputs.device,
         # dtype=inputs.dtype
     )
-    return torch.tensor(timestamps, dtype=torch.float32), torch.tensor(
-        output_queries, dtype=torch.float32
-    )
+    return timestamps.clone().detach(), output_queries.clone().detach()
 
 
 if __name__ == "__main__":

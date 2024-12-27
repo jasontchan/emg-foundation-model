@@ -64,7 +64,7 @@ class SpikeDataset(Dataset):
         # extract features (everything except session, time, gesture_instance, and gesture)
         features = torch.stack(
             [
-                torch.tensor(spike[1:-3], dtype=torch.float32)
+                spike[1:-3].clone().detach()
                 for spike in instance_spikes
             ]
         )
@@ -79,7 +79,7 @@ class SpikeDataset(Dataset):
             features,
             timestamps,
             torch.tensor(len(features)),
-            torch.tensor(gesture),
+            gesture.clone().detach(),
         )
 
     @staticmethod

@@ -12,6 +12,7 @@ import seaborn as sns
 from utilities import create_linspace_latent_tokens, create_output_queries
 from model import Model
 from spike_dataset import SpikeDataset
+from infinite_embedding_test import InfiniteVocabEmbedding
 
 
 class Trainer:
@@ -23,7 +24,8 @@ class Trainer:
         gesture_names,
         learning_rate=1e-4,
         weight_decay=0.01,
-        device="cuda" if torch.cuda.is_available() else "cpu",
+        # device="cuda" if torch.cuda.is_available() else "cpu",
+        device="cpu",
     ):
 
         # set member variables
@@ -44,7 +46,7 @@ class Trainer:
         )
 
         self.latent_idx, self.latent_timestamps = create_linspace_latent_tokens(
-            0, 3.0, 0.375, 32
+            0, 1.0, 0.125, 32
         )
 
     def train_epoch(self):
@@ -185,39 +187,17 @@ class Trainer:
 
 
 if __name__ == "__main__":
-
-    with open("data/all_spikes.pickle", "rb") as file:
-        all_spikes = pickle.load(file)
-    # print(all_spikes)
+    embedding_dim = 256
     with open("data/session_idx.pickle", "rb") as file:
         session_idx = pickle.load(file)
     with open("data/stage_idx.pickle", "rb") as file:
         stage_idx = pickle.load(file)
     with open("data/subject_idx.pickle", "rb") as file:
         subject_idx = pickle.load(file)
-    all_times = torch.tensor([dict["time"] for dict in all_spikes])
-    all_sessions = torch.tensor([dict["session"] for dict in all_spikes])
-    all_subjects = torch.tensor([dict["subject"] for dict in all_spikes])
-    all_channels = torch.tensor([dict["channel"] for dict in all_spikes])
-    all_prominences = torch.tensor([dict["prominence"] for dict in all_spikes])
-    all_durations = torch.tensor([dict["duration"] for dict in all_spikes])
-    all_gestures = torch.tensor([dict["gesture"] for dict in all_spikes])
-    all_gesture_instances = torch.tensor([int(dict["instance"]) for dict in all_spikes])
-    input_tensor = torch.vstack(
-        (
-            all_sessions,
-            all_subjects,
-            all_channels,
-            all_prominences,
-            all_durations,
-            all_times,
-            all_gesture_instances,
-            all_gestures,
-        )
-    )
+    with open("data/input_tensor.pickle", "rb") as file:
+        data = pickle.load(file)
 
-    data = input_tensor.t()
-    # print("input tensor", data)
+    print("input tensor", data)
 
     indices = list(range(len(data)))
     # print("indices", indices)
@@ -250,35 +230,32 @@ if __name__ == "__main__":
         shuffle=True,
         collate_fn=SpikeDataset.collate_fn,
     )
-
     # need parameters 'num_embeddings', 'embedding_dim', 'num_buckets', 'num_latents', and 'latent_dim'
     model = Model(
-        num_embeddings=50000,
-        embedding_dim=256,
-        num_buckets=32,
+        embedding_dim=embedding_dim,
         num_latents=256,
-        latent_dim=32,
+        latent_dim=256,
     )
 
 
-    # # Initialize trainer
-    # trainer = Trainer(
-    #     model=model,
-    #     train_loader=train_loader,
-    #     val_loader=val_loader,
-    #     gesture_names=list(stage_idx.values()), #NOTE: can change to keys if this is allowed to be strings
-    #     learning_rate=1e-4,
-    #     weight_decay=0.01,
-    # )
+    # Initialize trainer
+    trainer = Trainer(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        gesture_names=list(stage_idx.values()), #NOTE: can change to keys if this is allowed to be strings
+        learning_rate=1e-4,
+        weight_decay=0.01,
+    )
 
-    # # Train model
-    # trainer.train(n_epochs=100)
+    # Train model
+    trainer.train(n_epochs=20)
 
-    # # Make predictions
-    # # test_predictions, test_confidences = trainer.predict(_loader)
+    # Make predictions
+    # test_predictions, test_confidences = trainer.predict(_loader)
 
-    # # Print some predictions with their confidence
-    # # for pred, conf in zip(test_predictions[:5], test_confidences[:5]):
-    # #     print(
-    # #         f"Predicted gesture: {trainer.gesture_names[pred]} with confidence: {conf:.4f}"
-    # #     )
+    # Print some predictions with their confidence
+    # for pred, conf in zip(test_predictions[:5], test_confidences[:5]):
+    #     print(
+    #         f"Predicted gesture: {trainer.gesture_names[pred]} with confidence: {conf:.4f}"
+    #     )
