@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from hash_embedding import HashEmbedding
 from perceiver_rotary import PerceiverRotary
 from utilities import create_output_queries
-from infinite_embedding_test import InfiniteVocabEmbedding
+from infinite_embedding_new import InfiniteVocabEmbedding
 
 
 class Model(nn.Module):
@@ -17,7 +17,9 @@ class Model(nn.Module):
 
     def __init__(
         self,
-        embedding_dim,
+        embedding_dim, #model dimension
+        session_emb_dim,
+        subject_emb_dim,
         num_latents,
         latent_dim,
         num_classes,
@@ -30,10 +32,26 @@ class Model(nn.Module):
         self.embedding_dim = embedding_dim
         self.num_classes = num_classes
 
-        self.input_embedding = InfiniteVocabEmbedding(embedding_dim=embedding_dim)
-        self.input_embedding.load_state_dict(torch.load('data/infinite_vocab_embedding.pt'))
-        self.input_embedding.extend_vocab(torch.tensor([0.0, 0.0, 0.0, 0.0]))
+        # self.input_embedding = InfiniteVocabEmbedding(embedding_dim=embedding_dim)
+        # self.input_embedding.load_state_dict(torch.load('data/infinite_vocab_embedding.pt'))
+        # self.input_embedding.extend_vocab(torch.tensor([0.0, 0.0, 0.0, 0.0]))
+
+
+        self.session_embedding = InfiniteVocabEmbedding(embedding_dim=session_emb_dim)
+        self.session_embedding.load_state_dict(torch.load('data/session_vocab_embedding.pt'))
+        self.session_embedding.extend_vocab("0") #dk if this is necessary
+        print(self.session_embedding.vocab)
+        
+
+        self.subject_embedding = InfiniteVocabEmbedding(embedding_dim=subject_emb_dim)
+        self.subject_embedding.load_state_dict(torch.load('data/subject_vocab_embedding.pt'))
+        self.subject_embedding.extend_vocab("0") #dk if this is necessary
+
+        self.channel_embedding = nn.Embedding(17, embedding_dim=8)
         self.latent_embedding = nn.Embedding(num_latents, embedding_dim=latent_dim)
+
+        inner_dimension = session_emb_dim + subject_emb_dim + 8 + 2
+        self.projection = nn.Linear(inner_dimension, embedding_dim)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -78,15 +96,38 @@ class Model(nn.Module):
         labels=None,
         # output_batch_index
     ):
+        sessions = data[:, :, 0]      # [B, seq_len]
+        session_ids = torch.tensor([self.session_embedding.tokenizer(str(int(session.item()))) for session_seq in sessions for session in session_seq]) #TODO: check this
+        subjects = data[:, :, 1]      # [B, seq_len]
+        subject_ids = torch.tensor([self.subject_embedding.tokenizer(str(int(subject.item()))) for subject_seq in subjects for subject in subject_seq]) #TODO: check this
+        channel_ids = data[:, :, 2]      # [B, seq_len] channels and channel ids are the same!
+        prominence  = data[:, :, 3]     # [B, seq_len]
+        duration    = data[:, :, 4]     # [B, seq_len]
+
         batch_size = data.size(0)
         max_seq_len = data.size(1)
         padding_mask = self.create_padding_mask(
             sequence_lengths=sequence_lengths, max_length=max_seq_len
         )
-        indices = torch.tensor([[self.input_embedding.tokenizer(sequence)] for sequence in data])
-        inputs = self.input_embedding(indices)  # (batch_size, 1(?), max_seq_len, embedding_dim)
-        inputs = inputs.squeeze(1) #get rid of singleton dimension so its size [batch_size, max_seq_len, embedding_dim]
+        # indices = torch.tensor([[self.input_embedding.tokenizer(sequence)] for sequence in data])
+        # print("indices", indices)
+
+        session_emb = self.session_embedding(session_ids)
+        subject_emb = self.subject_embedding(subject_ids)
+        channel_emb = self.channel_embedding(channel_ids.long())
+        #shape prom and dur so can concat
+        prominence = prominence.unsqueeze(-1)
+        duration = duration.unsqueeze(-1)
+
+        #COMBINE EVERYTHING SO THEYRE ALL TOGETHER
+        inputs = torch.cat([session_emb, subject_emb, channel_emb, prominence, duration], dim=-1)
+        print("COMBINED INPUTS", inputs)
+        raise KeyboardInterrupt
+        inputs = self.projection(inputs)
+        # inputs = self.input_embedding(indices)  # (batch_size, 1(?), max_seq_len, embedding_dim)
+        # inputs = inputs.squeeze(1) #get rid of singleton dimension so its size [batch_size, max_seq_len, embedding_dim]
         inputs = self.dropout(inputs)
+
         latents = self.latent_embedding(latent_idx) #size [n_latents, lat_emb_dim]
         latents = latents.unsqueeze(0).expand(batch_size, -1, -1) #size [batch_size, n_latents, lat_emb_dim]
         latent_timestamps = latent_timestamps.unsqueeze(0).expand(batch_size, -1)
@@ -115,6 +156,13 @@ class Model(nn.Module):
         output_latents = self.layer_norm(output_latents)
         predictions = self.readout(output_latents).squeeze(1)
         print("PREDICTIONS", predictions)
+        if torch.isnan(predictions).any():
+            print("NaN detected in predictions")
+            print("Output latents stats:", 
+                "mean:", output_latents.mean().item(),
+                "std:", output_latents.std().item(),
+                "min:", output_latents.min().item(),
+                "max:", output_latents.max().item())
         loss = None
         if labels is not None:
             print("LABELS", labels)

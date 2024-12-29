@@ -14,6 +14,8 @@ from model import Model
 from spike_dataset import SpikeDataset
 from infinite_embedding_test import InfiniteVocabEmbedding
 
+torch.autograd.set_detect_anomaly(True)
+
 
 class Trainer:
     def __init__(
@@ -49,6 +51,57 @@ class Trainer:
             0, 1.0, 0.125, 32
         )
 
+    # def train_epoch(self):
+    #     self.model.train()
+
+    #     running_loss = 0.0
+    #     all_preds = []
+    #     all_labels = []
+
+    #     progress_bar = tqdm(self.train_loader, desc="Training")
+
+    #     for features, timestamps, lengths, labels in progress_bar:
+
+    #         features = features.to(self.device)
+    #         timestamps = timestamps.to(self.device)
+    #         lengths = lengths.to(self.device)
+    #         labels = labels.to(self.device)
+
+    #         print("TQDM UNPACK FEATURES:", features)
+    #         print("TQDM UNPACK timestamps:", timestamps)
+    #         print("TQDM UNPACK lengths:", lengths)
+    #         print("TQDM UNPACK labels:", labels)
+    #         # zero gradients
+    #         self.optimizer.zero_grad()
+
+    #         # forward pass!
+    #         predictions, loss = self.model(
+    #             data=features,
+    #             sequence_lengths=lengths,
+    #             time_stamps=timestamps,
+    #             latent_timestamps=self.latent_timestamps,
+    #             latent_idx=self.latent_idx,
+    #             labels=labels,
+    #         )
+
+    #         loss.backward()
+
+    #         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+
+    #         self.optimizer.step()
+
+    #         running_loss += loss.item()
+    #         pred_labels = torch.argmax(predictions, dim=1)
+    #         all_preds.extend(pred_labels.cpu().numpy())
+    #         all_labels.extend(labels.cpu().numpy())
+
+    #         progress_bar.set_postfix({"loss": f"{loss.item():.4f}"})
+
+    #     epoch_loss = running_loss / len(self.train_loader)
+    #     epoch_acc = accuracy_score(all_labels, all_preds)
+    #     epoch_f1 = f1_score(all_labels, all_preds, average="weighted")
+
+    #     return {"loss": epoch_loss, "accuracy": epoch_acc, "f1": epoch_f1}
     def train_epoch(self):
         self.model.train()
 
@@ -58,13 +111,31 @@ class Trainer:
 
         progress_bar = tqdm(self.train_loader, desc="Training")
 
-        for features, timestamps, lengths, labels in progress_bar:
+        for sessions, subjects, channels, prominences, durations, timestamps, lengths, labels in progress_bar:
 
-            features = features.to(self.device)
+            sessions = sessions.to(self.device)
+            subjects = subjects.to(self.device)
+            channels = channels.to(self.device)
+            prominences = prominences.to(self.device)
+            durations = durations.to(self.device)
+            # features = features.to(self.device)
             timestamps = timestamps.to(self.device)
             lengths = lengths.to(self.device)
             labels = labels.to(self.device)
 
+            # print("TQDM UNPACK sessions:", sessions)
+            # print("TQDM UNPACK subjects:", subjects)
+            # print("TQDM UNPACK channels:", channels)
+            # print("TQDM UNPACK prominences:", prominences)
+            # print("TQDM UNPACK durations:", durations)
+            # print("TQDM UNPACK timestamps:", timestamps)
+            # print("TQDM UNPACK lengths:", lengths)
+            # print("TQDM UNPACK labels:", labels)
+
+            features = torch.stack((sessions, subjects, channels, prominences, durations), dim=1)
+            features = torch.transpose(features, 1, 2)
+            print("features", features)
+            # print("final", final)
             # zero gradients
             self.optimizer.zero_grad()
 
@@ -234,6 +305,8 @@ if __name__ == "__main__":
     # need parameters 'num_embeddings', 'embedding_dim', 'num_buckets', 'num_latents', and 'latent_dim'
     model = Model(
         embedding_dim=embedding_dim,
+        session_emb_dim=8,
+        subject_emb_dim=8,
         num_latents=256,
         latent_dim=256,
         num_classes=len(list(stage_idx.values())),
