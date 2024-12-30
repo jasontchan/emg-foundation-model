@@ -97,9 +97,9 @@ class Model(nn.Module):
         # output_batch_index
     ):
         sessions = data[:, :, 0]      # [B, seq_len]
-        session_ids = torch.tensor([self.session_embedding.tokenizer(str(int(session.item()))) for session_seq in sessions for session in session_seq]) #TODO: check this
+        session_ids = torch.tensor([[self.session_embedding.tokenizer(str(int(session.item()))) for session in session_seq] for session_seq in sessions]) #TODO: check this
         subjects = data[:, :, 1]      # [B, seq_len]
-        subject_ids = torch.tensor([self.subject_embedding.tokenizer(str(int(subject.item()))) for subject_seq in subjects for subject in subject_seq]) #TODO: check this
+        subject_ids = torch.tensor([[self.subject_embedding.tokenizer(str(int(subject.item()))) for subject in subject_seq] for subject_seq in subjects]) #TODO: check this
         channel_ids = data[:, :, 2]      # [B, seq_len] channels and channel ids are the same!
         prominence  = data[:, :, 3]     # [B, seq_len]
         duration    = data[:, :, 4]     # [B, seq_len]
@@ -118,11 +118,12 @@ class Model(nn.Module):
         #shape prom and dur so can concat
         prominence = prominence.unsqueeze(-1)
         duration = duration.unsqueeze(-1)
+        print("sizes: session:", session_emb.size(), "subject:", subject_emb.size(), "channel:", channel_emb.size(), "prom:", prominence.size(), "duration:", duration.size())
 
         #COMBINE EVERYTHING SO THEYRE ALL TOGETHER
         inputs = torch.cat([session_emb, subject_emb, channel_emb, prominence, duration], dim=-1)
         print("COMBINED INPUTS", inputs)
-        raise KeyboardInterrupt
+        print("COMBINED INPUTS SIZE", inputs.size())
         inputs = self.projection(inputs)
         # inputs = self.input_embedding(indices)  # (batch_size, 1(?), max_seq_len, embedding_dim)
         # inputs = inputs.squeeze(1) #get rid of singleton dimension so its size [batch_size, max_seq_len, embedding_dim]

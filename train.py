@@ -14,7 +14,7 @@ from model import Model
 from spike_dataset import SpikeDataset
 from infinite_embedding_test import InfiniteVocabEmbedding
 
-torch.autograd.set_detect_anomaly(True)
+# torch.autograd.set_detect_anomaly(True)
 
 
 class Trainer:
@@ -123,19 +123,8 @@ class Trainer:
             lengths = lengths.to(self.device)
             labels = labels.to(self.device)
 
-            # print("TQDM UNPACK sessions:", sessions)
-            # print("TQDM UNPACK subjects:", subjects)
-            # print("TQDM UNPACK channels:", channels)
-            # print("TQDM UNPACK prominences:", prominences)
-            # print("TQDM UNPACK durations:", durations)
-            # print("TQDM UNPACK timestamps:", timestamps)
-            # print("TQDM UNPACK lengths:", lengths)
-            # print("TQDM UNPACK labels:", labels)
-
             features = torch.stack((sessions, subjects, channels, prominences, durations), dim=1)
             features = torch.transpose(features, 1, 2)
-            print("features", features)
-            # print("final", final)
             # zero gradients
             self.optimizer.zero_grad()
 
@@ -176,12 +165,19 @@ class Trainer:
         all_preds = []
         all_labels = []
 
-        for features, timestamps, lengths, labels in self.val_loader:
+        for sessions, subjects, channels, prominences, durations, timestamps, lengths, labels in self.val_loader:
 
-            features = features.to(self.device)
+            sessions = sessions.to(self.device)
+            subjects = subjects.to(self.device)
+            channels = channels.to(self.device)
+            prominences = prominences.to(self.device)
+            durations = durations.to(self.device)
             timestamps = timestamps.to(self.device)
             lengths = lengths.to(self.device)
             labels = labels.to(self.device)
+
+            features = torch.stack((sessions, subjects, channels, prominences, durations), dim=1)
+            features = torch.transpose(features, 1, 2)
 
             # forward pass!
             predictions, loss = self.model(
