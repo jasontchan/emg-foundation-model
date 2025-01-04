@@ -10,14 +10,12 @@ from infinite_embedding_new import InfiniteVocabEmbedding
 
 class Model(nn.Module):
     """
-    in the init function, create embedding objects and perceiverIO object
-
-    in the forward function, actually embed the data and run through perceiverIO while outputing the loss etc
+    main model
     """
 
     def __init__(
         self,
-        embedding_dim, #model dimension
+        embedding_dim,  # model dimension
         session_emb_dim,
         subject_emb_dim,
         num_latents,
@@ -27,25 +25,24 @@ class Model(nn.Module):
     ):
         super().__init__()
 
-        # store model parameters
         self.num_latents = num_latents
         self.embedding_dim = embedding_dim
         self.num_classes = num_classes
 
-        # self.input_embedding = InfiniteVocabEmbedding(embedding_dim=embedding_dim)
-        # self.input_embedding.load_state_dict(torch.load('data/infinite_vocab_embedding.pt'))
-        # self.input_embedding.extend_vocab(torch.tensor([0.0, 0.0, 0.0, 0.0]))
-
-
+        # embed session
         self.session_embedding = InfiniteVocabEmbedding(embedding_dim=session_emb_dim)
-        self.session_embedding.load_state_dict(torch.load('data/session_vocab_embedding.pt'))
-        self.session_embedding.extend_vocab("0") #dk if this is necessary
+        self.session_embedding.load_state_dict(
+            torch.load("data/session_vocab_embedding.pt")
+        )
+        self.session_embedding.extend_vocab("0")  # dk if this is necessary
         print(self.session_embedding.vocab)
-        
 
+        # embed subject
         self.subject_embedding = InfiniteVocabEmbedding(embedding_dim=subject_emb_dim)
-        self.subject_embedding.load_state_dict(torch.load('data/subject_vocab_embedding.pt'))
-        self.subject_embedding.extend_vocab("0") #dk if this is necessary
+        self.subject_embedding.load_state_dict(
+            torch.load("data/subject_vocab_embedding.pt")
+        )
+        self.subject_embedding.extend_vocab("0")  # dk if this is necessary
 
         self.channel_embedding = nn.Embedding(17, embedding_dim=8)
         self.latent_embedding = nn.Embedding(num_latents, embedding_dim=latent_dim)
@@ -55,7 +52,6 @@ class Model(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-        # create perceiverIO object
         self.perceiver_io = PerceiverRotary(
             dim=embedding_dim,
             context_dim=embedding_dim,
@@ -68,7 +64,6 @@ class Model(nn.Module):
             atn_dropout=dropout,
         )
 
-        # (A) Learned classification query (shape: [dim])
         self.class_query = nn.Parameter(torch.randn(embedding_dim))
 
         self.layer_norm = nn.LayerNorm(embedding_dim)
@@ -96,56 +91,74 @@ class Model(nn.Module):
         labels=None,
         # output_batch_index
     ):
-        sessions = data[:, :, 0]      # [B, seq_len]
-        session_ids = torch.tensor([[self.session_embedding.tokenizer(str(int(session.item()))) for session in session_seq] for session_seq in sessions]) #TODO: check this
-        subjects = data[:, :, 1]      # [B, seq_len]
-        subject_ids = torch.tensor([[self.subject_embedding.tokenizer(str(int(subject.item()))) for subject in subject_seq] for subject_seq in subjects]) #TODO: check this
-        channel_ids = data[:, :, 2]      # [B, seq_len] channels and channel ids are the same!
-        prominence  = data[:, :, 3]     # [B, seq_len]
-        duration    = data[:, :, 4]     # [B, seq_len]
+        sessions = data[:, :, 0]  # [B, seq_len]
+        session_ids = torch.tensor(
+            [
+                [
+                    self.session_embedding.tokenizer(str(int(session.item())))
+                    for session in session_seq
+                ]
+                for session_seq in sessions
+            ]
+        )  # TODO: check this
+        subjects = data[:, :, 1]  # [B, seq_len]
+        subject_ids = torch.tensor(
+            [
+                [
+                    self.subject_embedding.tokenizer(str(int(subject.item())))
+                    for subject in subject_seq
+                ]
+                for subject_seq in subjects
+            ]
+        )  # TODO: check this
+        channel_ids = data[
+            :, :, 2
+        ]  # [B, seq_len] channels and channel ids are the same!
+        prominence = data[:, :, 3]  # [B, seq_len]
+        duration = data[:, :, 4]  # [B, seq_len]
 
         batch_size = data.size(0)
         max_seq_len = data.size(1)
         padding_mask = self.create_padding_mask(
             sequence_lengths=sequence_lengths, max_length=max_seq_len
         )
-        # indices = torch.tensor([[self.input_embedding.tokenizer(sequence)] for sequence in data])
-        # print("indices", indices)
+        print("padding_mask", padding_mask)
+        print("padding mask size", padding_mask.size())
 
         session_emb = self.session_embedding(session_ids)
         subject_emb = self.subject_embedding(subject_ids)
         channel_emb = self.channel_embedding(channel_ids.long())
-        #shape prom and dur so can concat
+        # unsqueeze prom and dur so can concat
         prominence = prominence.unsqueeze(-1)
         duration = duration.unsqueeze(-1)
-        print("sizes: session:", session_emb.size(), "subject:", subject_emb.size(), "channel:", channel_emb.size(), "prom:", prominence.size(), "duration:", duration.size())
 
-        #COMBINE EVERYTHING SO THEYRE ALL TOGETHER
-        inputs = torch.cat([session_emb, subject_emb, channel_emb, prominence, duration], dim=-1)
-        print("COMBINED INPUTS", inputs)
-        print("COMBINED INPUTS SIZE", inputs.size())
+        # COMBINE EVERYTHING SO THEYRE ALL TOGETHER
+        inputs = torch.cat(
+            [session_emb, subject_emb, channel_emb, prominence, duration], dim=-1
+        )
         inputs = self.projection(inputs)
-        # inputs = self.input_embedding(indices)  # (batch_size, 1(?), max_seq_len, embedding_dim)
-        # inputs = inputs.squeeze(1) #get rid of singleton dimension so its size [batch_size, max_seq_len, embedding_dim]
         inputs = self.dropout(inputs)
 
-        latents = self.latent_embedding(latent_idx) #size [n_latents, lat_emb_dim]
-        latents = latents.unsqueeze(0).expand(batch_size, -1, -1) #size [batch_size, n_latents, lat_emb_dim]
+        latents = self.latent_embedding(latent_idx)  # size [n_latents, lat_emb_dim]
+        latents = latents.unsqueeze(0).expand(
+            batch_size, -1, -1
+        )  # size [batch_size, n_latents, lat_emb_dim]
         latent_timestamps = latent_timestamps.unsqueeze(0).expand(batch_size, -1)
         # # create output queries
         # output_timestamps, output_queries = create_output_queries(
         #     1.0, 1, batch_size, self.embedding_dim #max time 1.0, n_output queries = 1 (classification), b, dim
         # )
-        output_queries = self.class_query.unsqueeze(0).unsqueeze(1).expand(batch_size, 1, -1)
+        output_queries = (
+            self.class_query.unsqueeze(0).unsqueeze(1).expand(batch_size, 1, -1)
+        )
         output_timestamps = torch.tensor([1.0 for _ in range(batch_size)])
         output_timestamps = output_timestamps.unsqueeze(1)
-
 
         # run through perceiverIO and return loss
         output_latents = self.perceiver_io(
             inputs=inputs,
             latents=latents,
-            output_queries=output_queries,  # how do we omit this for training? do we need to omit for training?
+            output_queries=output_queries,
             input_timestamps=time_stamps,
             latent_timestamps=latent_timestamps,
             output_query_timestamps=output_timestamps,
@@ -157,13 +170,6 @@ class Model(nn.Module):
         output_latents = self.layer_norm(output_latents)
         predictions = self.readout(output_latents).squeeze(1)
         print("PREDICTIONS", predictions)
-        if torch.isnan(predictions).any():
-            print("NaN detected in predictions")
-            print("Output latents stats:", 
-                "mean:", output_latents.mean().item(),
-                "std:", output_latents.std().item(),
-                "min:", output_latents.min().item(),
-                "max:", output_latents.max().item())
         loss = None
         if labels is not None:
             print("LABELS", labels)
@@ -191,25 +197,3 @@ class Model(nn.Module):
             output_timestamps=output_timestamps,
         )
         return F.softmax(predictions, dim=-1)
-
-    # @staticmethod
-    # def collate_fn(batch): #NOTE: why do i have another collate function here ....? looks like its not being used ok
-    #     """
-    #     Custom collate function for handling variable length sequences in DataLoader.
-
-    #     Args:
-    #         batch: List of tensors with variable lengths
-
-    #     Returns:
-    #         Padded batch tensor and sequence lengths
-    #     """
-    #     # Sort batch by sequence length (descending)
-    #     batch.sort(key=lambda x: x.size(0), reverse=True)
-
-    #     # Get sequence lengths
-    #     lengths = torch.tensor([x.size(0) for x in batch])
-
-    #     # Pad sequences
-    #     padded = torch.nn.utils.rnn.pad_sequence(batch, batch_first=True)
-
-    #     return padded, lengths

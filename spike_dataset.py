@@ -3,9 +3,10 @@ from torch.utils.data import Dataset
 import numpy as np
 from typing import List, Tuple
 
+
 class SpikeDataset(Dataset):
     def __init__(self, data: List[List]):
-        '''
+        """
         data: List of spike tokens where
         [
         [session, subject, channel, prominence, duration, time, gesture_instance, gesture],
@@ -13,7 +14,7 @@ class SpikeDataset(Dataset):
         [session, subject, channel, prominence, duration, time, gesture_instance, gesture],
         ...
         ]
-        '''
+        """
         self.data = data
         # Group spikes by gesture instance
         self.gesture_instances = self._group_by_gesture_instance()
@@ -39,21 +40,38 @@ class SpikeDataset(Dataset):
         return gesture_instances
 
     def _normalize_times(self, spikes: List[List]) -> torch.Tensor:
-        """Normalize timestamps to be between 0 and 1 within the gesture instance"""
+        """0-1 normalization within gesture instance"""
         times = np.array([spike[-3] for spike in spikes])  # time column
         min_time = times.min()
         max_time = times.max()
         normalized = (times - min_time) / (max_time - min_time + 1e-6)
         return torch.tensor(normalized, dtype=torch.float32)
 
+    def _normalize_durations(
+        self, durations
+    ) -> torch.Tensor:  # double check this is w/in instance yk
+        """0-1 normalization within gesture instance"""
+        durations = np.array(durations)
+        min_dur = durations.min()
+        max_dur = durations.max()
+        normalized = (durations - min_dur) / (max_dur - min_dur + 1e-6)
+        return torch.tensor(normalized, dtype=torch.float32)
+
     def __len__(self) -> int:
         return len(self.gesture_instances)
 
-    def __getitem__(
-        self, idx: int
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    def __getitem__(self, idx: int) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        int,
+    ]:
         """
-        Returns: 
+        Returns:
             session tensor [0, 0, 0, 0, 0, 0,...] always the same
             subject tensor [0, 0, 0, 0, 0, 0, ...] always the same
             channel [3, 6, 2, 6, 8, 5, 13, 8, ...]
@@ -72,40 +90,27 @@ class SpikeDataset(Dataset):
         #         for spike in instance_spikes
         #     ]
         # )
-        sessions = torch.stack( #always the same
-            [
-                spike[0].clone().detach() 
-                for spike in instance_spikes
-            ]
+        sessions = torch.stack(  # always the same
+            [spike[0].clone().detach() for spike in instance_spikes]
         )
-        subjects = torch.stack( #always the same
-            [
-                spike[1].clone().detach() 
-                for spike in instance_spikes
-            ]
+        subjects = torch.stack(  # always the same
+            [spike[1].clone().detach() for spike in instance_spikes]
         )
-        channels = torch.stack(
-            [
-                spike[2].clone().detach() 
-                for spike in instance_spikes
-            ]
-        )
+        channels = torch.stack([spike[2].clone().detach() for spike in instance_spikes])
         prominences = torch.stack(
-            [
-                spike[3].clone().detach() 
-                for spike in instance_spikes
-            ]
+            [spike[3].clone().detach() for spike in instance_spikes]
         )
         durations = torch.stack(
-            [
-                spike[4].clone().detach() 
-                for spike in instance_spikes
-            ]
+            [spike[4].clone().detach() for spike in instance_spikes]
         )
-        
 
         # Normalize timestamps
         timestamps = self._normalize_times(instance_spikes)
+
+        # Normalize durations
+        durations = self._normalize_durations(
+            durations
+        )  # NOTE: is this not ideal bc outliers will be 1 and force everything to be small yk
 
         # Get gesture label (should be same for all spikes in instance)
         gesture = instance_spikes[0][-1]
@@ -118,10 +123,10 @@ class SpikeDataset(Dataset):
             durations,
             # features,
             timestamps,
-            torch.tensor(len(timestamps)), #NOTE: can be any of these but double check
+            torch.tensor(len(timestamps)),  # NOTE: can be any of these but double check
             gesture.clone().detach(),
         )
-    
+
     # @staticmethod
     # def collate_fn(batch):
     #     """Custom collate function to handle variable length sequences"""
@@ -147,8 +152,8 @@ class SpikeDataset(Dataset):
 
     #     return (
     #         padded_features,
-    #         padded_timestamps, 
-    #         lengths, 
+    #         padded_timestamps,
+    #         lengths,
     #         labels
     #     )
 
@@ -156,7 +161,16 @@ class SpikeDataset(Dataset):
     def collate_fn(batch):
         """Custom collate function to handle variable length sequences"""
         # print("BATCH", batch)
-        sessions, subjects, channels, prominences, durations, timestamps, lengths, labels = zip(*batch)
+        (
+            sessions,
+            subjects,
+            channels,
+            prominences,
+            durations,
+            timestamps,
+            lengths,
+            labels,
+        ) = zip(*batch)
 
         max_len = max(lengths)
         batch_size = len(batch)
@@ -196,7 +210,7 @@ class SpikeDataset(Dataset):
             padded_channels,
             padded_prominences,
             padded_durations,
-            padded_timestamps, 
-            lengths, 
-            labels
+            padded_timestamps,
+            lengths,
+            labels,
         )

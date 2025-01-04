@@ -22,10 +22,8 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer("inv_freq", inv_freq)
 
     def forward(self, timestamps):
-        print("TIME STAMPS", timestamps)
         freqs = torch.einsum("..., f -> ... f", timestamps, self.inv_freq)
         freqs = repeat(freqs, "... n -> ... (n r)", r=2)
-        print("FREQS", freqs)
         return freqs
 
 

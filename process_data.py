@@ -34,7 +34,7 @@ if __name__ == "__main__":
     with open("data/input_tensor.pickle", "wb") as handle:
         pickle.dump(input_tensor, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    #construct vocabulary!
+    # construct vocabulary!
     # infinite_vocab = InfiniteVocabEmbedding(embedding_dim=embedding_dim)
     # tokens = [spike[1:-3].clone().detach() for spike in input_tensor]
     # infinite_vocab.initialize_vocab(tokens)
@@ -45,10 +45,10 @@ if __name__ == "__main__":
     sessions = [str(int(spike[0])) for spike in input_tensor]
     session_vocab.initialize_vocab(sessions)
 
-    torch.save(session_vocab.state_dict(), 'data/session_vocab_embedding.pt')
+    torch.save(session_vocab.state_dict(), "data/session_vocab_embedding.pt")
 
     subject_vocab = InfiniteVocabEmbedding(embedding_dim=subject_emb_dim)
     subjects = [str(int(spike[1])) for spike in input_tensor]
     subject_vocab.initialize_vocab(subjects)
 
-    torch.save(subject_vocab.state_dict(), 'data/subject_vocab_embedding.pt')
+    torch.save(subject_vocab.state_dict(), "data/subject_vocab_embedding.pt")
