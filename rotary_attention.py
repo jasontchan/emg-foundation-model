@@ -17,12 +17,14 @@ class RotaryCrossAttention(nn.Module):
         self.dropout = dropout
         self.rotate_value = rotate_value
 
-        self.norm = nn.LayerNorm(dim)
-        self.norm_context = nn.LayerNorm(context_dim)
+        self.norm = nn.LayerNorm(dim, dtype=torch.float64)
+        self.norm_context = nn.LayerNorm(context_dim, dtype=torch.float64)
 
-        self.to_q = nn.Linear(dim, inner_dim, bias=False)
-        self.to_kv = nn.Linear(context_dim, inner_dim * 2, bias=False)
-        self.to_out = nn.Linear(inner_dim, dim)
+        self.to_q = nn.Linear(dim, inner_dim, bias=False, dtype=torch.float64)
+        self.to_kv = nn.Linear(
+            context_dim, inner_dim * 2, bias=False, dtype=torch.float64
+        )
+        self.to_out = nn.Linear(inner_dim, dim, dtype=torch.float64)
 
     def forward(
         self,
@@ -40,15 +42,17 @@ class RotaryCrossAttention(nn.Module):
         k, v = self.to_kv(x_context).chunk(2, dim=-1)
 
         out = rotary_default_attention(
-            q=q, k=k, v=v,
-            rotary_time_emb_q=rotary_time_emb_query, 
+            q=q,
+            k=k,
+            v=v,
+            rotary_time_emb_q=rotary_time_emb_query,
             rotary_time_emb_kv=rotary_time_emb_context,
             num_heads=self.heads,
             dropout_p=self.dropout if self.training else 0,
             rotate_value=self.rotate_value,
             kv_mask=context_mask,
         )
-        
+
         out = self.to_out(out)
         return out
 
@@ -150,6 +154,38 @@ def rotary_default_attention(
     print("q size:", q.size())
     print("k size", k.size())
     print("v size", v.size())
+    # print(
+    #     "q shape",
+    #     q.shape,
+    #     "k shape",
+    #     k.shape,
+    #     "v shape",
+    #     v.shape,
+    #     "mask shape",
+    #     kv_mask.shape,
+    # )
+    print("any NaN in q?", torch.isnan(q).any())
+    print("any NaN in k?", torch.isnan(k).any())
+    print("any NaN in v?", torch.isnan(v).any())
+    print(
+        "q max abs",
+        q.abs().max().item(),
+        "k max abs",
+        k.abs().max().item(),
+        "v max abs",
+        v.abs().max().item(),
+    )
+    q0 = q[0, 0]  # shape [q_len, d_head]
+    k0 = k[0, 0]  # shape [k_len, d_head]
+
+    dot = torch.einsum("qd,kd->qk", q0, k0)  # => [q_len, k_len]
+    print(
+        "Dot product stats for sample 0:",
+        dot.min().item(),
+        dot.max().item(),
+        dot.abs().mean().item(),
+    )
+
     # perform attention, by default will use the optimal attention implementation
     out = F.scaled_dot_product_attention(
         q,
@@ -157,6 +193,7 @@ def rotary_default_attention(
         v,
         attn_mask=kv_mask,
         dropout_p=dropout_p,
+        # dropout_p=0.0,
     )
 
     if rotate_value:

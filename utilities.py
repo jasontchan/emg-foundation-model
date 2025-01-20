@@ -25,7 +25,7 @@ def create_linspace_latent_tokens(start, end, step, num_latents_per_step):
     latent_index = repeat(latent_index, "u -> (t u)", t=num_timestamps)
 
     return torch.tensor(latent_index, dtype=torch.long), torch.tensor(
-        latent_timestamps, dtype=torch.float32
+        latent_timestamps, dtype=torch.float64
     )
 
 

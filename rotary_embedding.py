@@ -5,7 +5,7 @@ from einops import repeat, rearrange
 
 class RotaryEmbedding(nn.Module):
 
-    def __init__(self, dimension, t_min=1e-4, t_max=1.0):
+    def __init__(self, dimension, t_min=1e-2, t_max=1.0):
         super().__init__()
         inv_freq = torch.zeros(dimension // 2)
         inv_freq[: dimension // 4] = (

@@ -88,14 +88,15 @@ class Trainer:
             self.optimizer.zero_grad()
 
             # forward pass!
-            predictions, loss = self.model(
-                data=features,
-                sequence_lengths=lengths,
-                time_stamps=timestamps,
-                latent_timestamps=self.latent_timestamps,
-                latent_idx=self.latent_idx,
-                labels=labels,
-            )
+            with torch.cuda.amp.autocast(enabled=False):
+                predictions, loss = self.model(
+                    data=features,
+                    sequence_lengths=lengths,
+                    time_stamps=timestamps,
+                    latent_timestamps=self.latent_timestamps,
+                    latent_idx=self.latent_idx,
+                    labels=labels,
+                )
 
             loss.backward()
 
@@ -274,6 +275,7 @@ if __name__ == "__main__":
         latent_dim=256,
         num_classes=len(list(stage_idx.values())),
     )
+    model.double()
     # Initialize trainer
     trainer = Trainer(
         model=model,

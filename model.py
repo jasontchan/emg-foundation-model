@@ -48,7 +48,7 @@ class Model(nn.Module):
         self.latent_embedding = nn.Embedding(num_latents, embedding_dim=latent_dim)
 
         inner_dimension = session_emb_dim + subject_emb_dim + 8 + 2
-        self.projection = nn.Linear(inner_dimension, embedding_dim)
+        self.projection = nn.Linear(inner_dimension, embedding_dim, dtype=torch.float64)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -66,12 +66,14 @@ class Model(nn.Module):
 
         self.class_query = nn.Parameter(torch.randn(embedding_dim))
 
-        self.layer_norm = nn.LayerNorm(embedding_dim)
+        self.layer_norm = nn.LayerNorm(embedding_dim, dtype=torch.float64)
 
-        self.readout = nn.Linear(embedding_dim, self.num_classes)  # predictions + loss
+        self.readout = nn.Linear(
+            embedding_dim, self.num_classes, dtype=torch.float64
+        )  # predictions + loss
         self.dim = embedding_dim  # double check d
 
-    def create_padding_mask(  # TODO: consider moving this to utilities?
+    def create_padding_mask(
         self, sequence_lengths: torch.Tensor, max_length: int
     ) -> torch.Tensor:
         batch_size = sequence_lengths.size(0)
@@ -136,6 +138,7 @@ class Model(nn.Module):
         inputs = torch.cat(
             [session_emb, subject_emb, channel_emb, prominence, duration], dim=-1
         )
+        inputs = inputs.to(torch.float64)
         inputs = self.projection(inputs)
         inputs = self.dropout(inputs)
 
