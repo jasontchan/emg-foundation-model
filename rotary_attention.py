@@ -91,15 +91,15 @@ class RotarySelfAttention(nn.Module):
                 f"If you wish to use `x_seqlen`, please use memory efficient "
                 f"attention. "
             )
-        print(
-            "SHAPES:",
-            "q:",
-            q.size(),
-            "k:",
-            k.size(),
-            "v:",
-            v.size(),
-        )
+        # print(
+        #     "SHAPES:",
+        #     "q:",
+        #     q.size(),
+        #     "k:",
+        #     k.size(),
+        #     "v:",
+        #     v.size(),
+        # )
         out = rotary_default_attention(
             q=q,
             k=k,
@@ -128,17 +128,17 @@ def rotary_default_attention(
     kv_mask=None,  # (b, n_kv)
 ):  # Output: (b, n, (h d), )
     r"""Wraps the default attention implementation with rotary embedding application."""
-    print("q size", q.size())
-    print("k size", k.size())
-    print("v size", v.size())
-    print("rotary_time_emb_q size", rotary_time_emb_q.size())
-    print("rotary_time_emb_kv size", rotary_time_emb_kv.size())
+    # print("q size", q.size())
+    # print("k size", k.size())
+    # print("v size", v.size())
+    # print("rotary_time_emb_q size", rotary_time_emb_q.size())
+    # print("rotary_time_emb_kv size", rotary_time_emb_kv.size())
     # default attention expects shape b h n d
     q = rearrange(q, "b n (h d) -> b h n d", h=num_heads)
     k = rearrange(k, "b n (h d) -> b h n d", h=num_heads)
     v = rearrange(v, "b n (h d) -> b h n d", h=num_heads)
 
-    print("q size", q.size(), "k size", k.size(), "v size", v.size())
+    # print("q size", q.size(), "k size", k.size(), "v size", v.size())
     # apply rotary embeddings
 
     q = apply_rotary_pos_emb(rotary_time_emb_q, q, dim=1)
@@ -150,10 +150,10 @@ def rotary_default_attention(
     if kv_mask is not None:
         kv_mask = rearrange(kv_mask, "b n -> b () () n")
 
-    print("BEFORE DPA:")
-    print("q size:", q.size())
-    print("k size", k.size())
-    print("v size", v.size())
+    # print("BEFORE DPA:")
+    # print("q size:", q.size())
+    # print("k size", k.size())
+    # print("v size", v.size())
     # print(
     #     "q shape",
     #     q.shape,
@@ -164,27 +164,23 @@ def rotary_default_attention(
     #     "mask shape",
     #     kv_mask.shape,
     # )
-    print("any NaN in q?", torch.isnan(q).any())
-    print("any NaN in k?", torch.isnan(k).any())
-    print("any NaN in v?", torch.isnan(v).any())
-    print(
-        "q max abs",
-        q.abs().max().item(),
-        "k max abs",
-        k.abs().max().item(),
-        "v max abs",
-        v.abs().max().item(),
-    )
-    q0 = q[0, 0]  # shape [q_len, d_head]
-    k0 = k[0, 0]  # shape [k_len, d_head]
-
-    dot = torch.einsum("qd,kd->qk", q0, k0)  # => [q_len, k_len]
-    print(
-        "Dot product stats for sample 0:",
-        dot.min().item(),
-        dot.max().item(),
-        dot.abs().mean().item(),
-    )
+    # print("any NaN in q?", torch.isnan(q).any())
+    # print("any NaN in k?", torch.isnan(k).any())
+    # print("any NaN in v?", torch.isnan(v).any())
+    # print(
+    #     "q max abs",
+    #     q.abs().max().item(),
+    #     "k max abs",
+    #     k.abs().max().item(),
+    #     "v max abs",
+    #     v.abs().max().item(),
+    # )
+    # print(
+    #     "Dot product stats for sample 0:",
+    #     dot.min().item(),
+    #     dot.max().item(),
+    #     dot.abs().mean().item(),
+    # )
 
     # perform attention, by default will use the optimal attention implementation
     out = F.scaled_dot_product_attention(

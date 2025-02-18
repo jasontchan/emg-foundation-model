@@ -52,3 +52,4 @@ if __name__ == "__main__":
     subject_vocab.initialize_vocab(subjects)
 
     torch.save(subject_vocab.state_dict(), "data/subject_vocab_embedding.pt")
+

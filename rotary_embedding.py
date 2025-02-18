@@ -22,6 +22,7 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer("inv_freq", inv_freq)
 
     def forward(self, timestamps):
+        timestamps = timestamps.to(self.inv_freq.device)
         freqs = torch.einsum("..., f -> ... f", timestamps, self.inv_freq)
         freqs = repeat(freqs, "... n -> ... (n r)", r=2)
         return freqs
@@ -41,6 +42,6 @@ def apply_rotary_pos_emb(freqs, x, dim=1):
     elif dim == 2:
         freqs = rearrange(freqs, "n m ... -> n m () ...")
     # freqs = torch.repeat_interleave(freqs, repeats=4, dim=2)
-    print("FREQS SIZE:", freqs.size(), "X:", x.size())
+    # print("FREQS SIZE:", freqs.size(), "X:", x.size())
     x = (x * freqs.cos().to(dtype)) + (rotate_half(x) * freqs.sin().to(dtype))
     return x

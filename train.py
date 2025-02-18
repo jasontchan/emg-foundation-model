@@ -15,7 +15,7 @@ from spike_dataset import SpikeDataset
 from infinite_embedding_test import InfiniteVocabEmbedding
 
 torch.autograd.set_detect_anomaly(True)
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Trainer:
     def __init__(
@@ -26,8 +26,8 @@ class Trainer:
         gesture_names,
         learning_rate=1e-4,
         weight_decay=0.01,
-        # device="cuda" if torch.cuda.is_available() else "cpu",
-        device="cpu",
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        # device="cpu",
     ):
 
         # set member variables
@@ -229,7 +229,7 @@ if __name__ == "__main__":
     embedding_dim = 256
     with open("data/session_idx.pickle", "rb") as file:
         session_idx = pickle.load(file)
-    with open("data/stage_idx.pickle", "rb") as file:
+    with open("data/key_idx.pickle", "rb") as file:
         stage_idx = pickle.load(file)
     with open("data/subject_idx.pickle", "rb") as file:
         subject_idx = pickle.load(file)
@@ -242,27 +242,29 @@ if __name__ == "__main__":
     train_indices, val_indices = train_test_split(indices, test_size=0.2)
     training_data = data[train_indices]
     val_data = data[val_indices]
+    labels = set(stage_idx.values())
+    print("STAGE IDX", stage_idx)
 
     # print("training_data", training_data)
     train_spike_token_data = SpikeDataset(training_data)
     val_spike_token_data = SpikeDataset(val_data)
 
-    sample_item = train_spike_token_data[0]
-    print("Sample item from dataset:")
-    print("Type:", type(sample_item))
-    print("Length:", len(sample_item))
-    print("Contents:", sample_item)
+    # sample_item = train_spike_token_data[0]
+    # print("Sample item from dataset:")
+    # print("Type:", type(sample_item))
+    # print("Length:", len(sample_item))
+    # print("Contents:", sample_item)
 
-    print("amount of data in training", len(train_spike_token_data))
+    # print("amount of data in training", len(train_spike_token_data))
     train_loader = DataLoader(
         train_spike_token_data,
-        batch_size=3,  # NOTE: this is for the small dataset poc
+        batch_size=32,  
         shuffle=True,
         collate_fn=SpikeDataset.collate_fn,
     )
     val_loader = DataLoader(
         val_spike_token_data,
-        batch_size=3,
+        batch_size=32,
         shuffle=True,
         collate_fn=SpikeDataset.collate_fn,
     )
@@ -274,7 +276,7 @@ if __name__ == "__main__":
         num_latents=256,
         latent_dim=256,
         num_classes=len(list(stage_idx.values())),
-    )
+    ).to(device)
     model.double()
     # Initialize trainer
     trainer = Trainer(

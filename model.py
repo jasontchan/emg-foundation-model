@@ -7,7 +7,7 @@ from perceiver_rotary import PerceiverRotary
 from utilities import create_output_queries
 from infinite_embedding_new import InfiniteVocabEmbedding
 
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class Model(nn.Module):
     """
     main model
@@ -28,9 +28,11 @@ class Model(nn.Module):
         self.num_latents = num_latents
         self.embedding_dim = embedding_dim
         self.num_classes = num_classes
+        self.num_channels = 32
+        self.channel_emb_dim = 16
 
         # embed session
-        self.session_embedding = InfiniteVocabEmbedding(embedding_dim=session_emb_dim)
+        self.session_embedding = InfiniteVocabEmbedding(embedding_dim=session_emb_dim).to(device)
         self.session_embedding.load_state_dict(
             torch.load("data/session_vocab_embedding.pt")
         )
@@ -38,16 +40,16 @@ class Model(nn.Module):
         print(self.session_embedding.vocab)
 
         # embed subject
-        self.subject_embedding = InfiniteVocabEmbedding(embedding_dim=subject_emb_dim)
+        self.subject_embedding = InfiniteVocabEmbedding(embedding_dim=subject_emb_dim).to(device)
         self.subject_embedding.load_state_dict(
             torch.load("data/subject_vocab_embedding.pt")
         )
         self.subject_embedding.extend_vocab("0")  # dk if this is necessary
 
-        self.channel_embedding = nn.Embedding(17, embedding_dim=8)
-        self.latent_embedding = nn.Embedding(num_latents, embedding_dim=latent_dim)
+        self.channel_embedding = nn.Embedding(self.num_channels+1, embedding_dim=self.channel_emb_dim).to(device)
+        self.latent_embedding = nn.Embedding(num_latents, embedding_dim=latent_dim).to(device)
 
-        inner_dimension = session_emb_dim + subject_emb_dim + 8 + 2
+        inner_dimension = session_emb_dim + subject_emb_dim + self.channel_emb_dim + 2
         self.projection = nn.Linear(inner_dimension, embedding_dim, dtype=torch.float64)
 
         self.dropout = nn.Dropout(dropout)
@@ -79,7 +81,7 @@ class Model(nn.Module):
         batch_size = sequence_lengths.size(0)
         mask = (
             torch.arange(max_length, device=sequence_lengths.device)[None, :]
-            >= sequence_lengths[:, None]
+            < sequence_lengths[:, None]
         )
         return mask  # shape: (batch_size, max_length)
 
@@ -103,6 +105,7 @@ class Model(nn.Module):
                 for session_seq in sessions
             ]
         )  # TODO: check this
+        session_ids = session_ids.to(self.session_embedding.weight.device)
         subjects = data[:, :, 1]  # [B, seq_len]
         subject_ids = torch.tensor(
             [
@@ -113,6 +116,7 @@ class Model(nn.Module):
                 for subject_seq in subjects
             ]
         )  # TODO: check this
+        subject_ids = subject_ids.to(self.subject_embedding.weight.device)
         channel_ids = data[
             :, :, 2
         ]  # [B, seq_len] channels and channel ids are the same!
@@ -124,12 +128,12 @@ class Model(nn.Module):
         padding_mask = self.create_padding_mask(
             sequence_lengths=sequence_lengths, max_length=max_seq_len
         )
-        print("padding_mask", padding_mask)
-        print("padding mask size", padding_mask.size())
+        # print("padding_mask", padding_mask)
+        # print("padding mask size", padding_mask.size())
 
-        session_emb = self.session_embedding(session_ids)
-        subject_emb = self.subject_embedding(subject_ids)
-        channel_emb = self.channel_embedding(channel_ids.long())
+        session_emb = self.session_embedding(session_ids).to(device)
+        subject_emb = self.subject_embedding(subject_ids).to(device)
+        channel_emb = self.channel_embedding(channel_ids.long()).to(device)
         # unsqueeze prom and dur so can concat
         prominence = prominence.unsqueeze(-1)
         duration = duration.unsqueeze(-1)
@@ -137,11 +141,12 @@ class Model(nn.Module):
         # COMBINE EVERYTHING SO THEYRE ALL TOGETHER
         inputs = torch.cat(
             [session_emb, subject_emb, channel_emb, prominence, duration], dim=-1
-        )
+        ).to(device)
         inputs = inputs.to(torch.float64)
         inputs = self.projection(inputs)
         inputs = self.dropout(inputs)
 
+        latent_idx = latent_idx.to(self.latent_embedding.weight.device)
         latents = self.latent_embedding(latent_idx)  # size [n_latents, lat_emb_dim]
         latents = latents.unsqueeze(0).expand(
             batch_size, -1, -1
@@ -154,7 +159,7 @@ class Model(nn.Module):
         output_queries = (
             self.class_query.unsqueeze(0).unsqueeze(1).expand(batch_size, 1, -1)
         )
-        output_timestamps = torch.tensor([1.0 for _ in range(batch_size)])
+        output_timestamps = torch.tensor([1.0 for _ in range(batch_size)]).to(device)
         output_timestamps = output_timestamps.unsqueeze(1)
 
         # run through perceiverIO and return loss
