@@ -1,5 +1,6 @@
 import glob
 import pickle
+import h5py
 import numpy as np
 import yaml
 import random
@@ -10,15 +11,27 @@ from multiprocessing import Pool, cpu_count, Manager, Lock, Value
 from emg2qwerty.data import EMGSessionData
 from scipy import stats
 from scipy.signal import find_peaks
+import torch
+from infinite_embedding_new import InfiniteVocabEmbedding
+
 
 DATA_DOWNLOAD_DIR = Path.home()
+TRAIN = True #set to false for validation data
+DATA_STORE = "full_data/"
 
 CONFIG_PATH = Path(__file__).parents[1].joinpath("emg2qwerty/config/user/generic.yaml")
 
 def load_training_config(config_path):
     with open(config_path, "r") as file:
         config = yaml.safe_load(file)
-    return [file['session'] + '.hdf5' for file in config['dataset']['train']]
+    dataset = config['dataset']['train'] if TRAIN else config['dataset']['val']
+    return [file['session'] + '.hdf5' for file in dataset]
+
+# def load_if_exists(filepath):
+#     if os.path.exists(filepath):
+#         with h5py.File(filepath, 'r') as hdf5_file:
+#             return hdf5_file['processed_stages'][:]
+#     return None
 
 def load_if_exists(filepath):
     if os.path.exists(filepath):
@@ -27,10 +40,11 @@ def load_if_exists(filepath):
     return None
 
 stages = load_training_config(CONFIG_PATH)
-processed_stages = load_if_exists("data/processed_stages.pickle") or set()
+proc_path = DATA_STORE + "processed_stages.pickle" if TRAIN else DATA_STORE + "processed_stages.pickle"
+processed_stages = load_if_exists(proc_path) or set()
 random.seed(0)
 random.shuffle(stages)
-stages = stages[:50]
+stages = stages[:200]
 processed_stages.update(set(stages))
 
 # stages = sorted(glob.glob("../emg2qwerty/data/*.hdf5"))
@@ -62,6 +76,7 @@ def process_stage(stage):
     session_name = session.metadata['session_name']
     subject = session.metadata['user']
     keystrokes = session.keystrokes
+    session_timestamps = session.timestamps
 
     with lock:
         if session_name not in session_idx:
@@ -85,7 +100,7 @@ def process_stage(stage):
 
         start_time = key_event["start"]
         end_time = key_event["end"]
-        start_index = np.searchsorted(session.timestamps, start_time)
+        start_index = np.searchsorted(session_timestamps, start_time)
 
         emg_slice = session.slice(start_t=start_time, end_t=end_time)
 
@@ -100,13 +115,13 @@ def process_stage(stage):
                     continue 
 
                 global_indices = start_index + peaks
-                peak_timestamps = session.timestamps[global_indices]
+                peak_timestamps = session_timestamps[global_indices]
 
                 right_base_indices = start_index + properties["right_bases"]
-                right_base_timestamps = session.timestamps[right_base_indices]
+                right_base_timestamps = session_timestamps[right_base_indices]
 
                 left_base_indices = start_index + properties["left_bases"]
-                left_base_timestamps = session.timestamps[left_base_indices]
+                left_base_timestamps = session_timestamps[left_base_indices]
 
                 durations = right_base_timestamps - left_base_timestamps
                 time_occurrences = peak_timestamps - start_time
@@ -145,19 +160,68 @@ if __name__ == "__main__":
 
     all_spikes = [spike for sublist in results for spike in sublist]
 
-    with open("data/all_spikes.pickle", "wb") as handle:
-        pickle.dump(all_spikes, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    embedding_dim = 256
+    session_emb_dim = 8
+    subject_emb_dim = 8
 
-    with open("data/session_idx.pickle", "wb") as handle:
+    all_times = torch.tensor([dict["time"] for dict in all_spikes])
+    all_sessions = torch.tensor([dict["session"] for dict in all_spikes])
+    all_subjects = torch.tensor([dict["subject"] for dict in all_spikes])
+    all_channels = torch.tensor([dict["channel"] for dict in all_spikes])
+    all_prominences = torch.tensor([dict["prominence"] for dict in all_spikes])
+    all_durations = torch.tensor([dict["duration"] for dict in all_spikes])
+    all_gestures = torch.tensor([dict["gesture"] for dict in all_spikes])
+    all_gesture_instances = torch.tensor([int(dict["instance"]) for dict in all_spikes])
+    input_tensor = torch.vstack(
+        (
+            all_sessions,
+            all_subjects,
+            all_channels,
+            all_prominences,
+            all_durations,
+            all_times,
+            all_gesture_instances,
+            all_gestures,
+        )
+    )
+    input_tensor = input_tensor.t()
+
+    dataset = DATA_STORE+'train_data.h5' if TRAIN else DATA_STORE+'validation_data.h5'
+    with h5py.File(dataset, 'w') as file:
+        file.create_dataset('input_tensor', data=input_tensor.numpy())
+
+    # construct vocabulary!
+    # infinite_vocab = InfiniteVocabEmbedding(embedding_dim=embedding_dim)
+    # tokens = [spike[1:-3].clone().detach() for spike in input_tensor]
+    # infinite_vocab.initialize_vocab(tokens)
+
+    # torch.save(infinite_vocab.state_dict(), 'data/infinite_vocab_embedding.pt')
+
+    session_vocab = InfiniteVocabEmbedding(embedding_dim=session_emb_dim)
+    sessions = [str(int(spike[0])) for spike in input_tensor]
+    session_vocab.initialize_vocab(sessions)
+
+    torch.save(session_vocab.state_dict(), DATA_STORE+"session_vocab_embedding.pt")
+
+    subject_vocab = InfiniteVocabEmbedding(embedding_dim=subject_emb_dim)
+    subjects = [str(int(spike[1])) for spike in input_tensor]
+    subject_vocab.initialize_vocab(subjects)
+
+    torch.save(subject_vocab.state_dict(), DATA_STORE+"subject_vocab_embedding.pt")
+
+    # with open("data/all_spikes.pickle", "wb") as handle:
+    #     pickle.dump(all_spikes, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    with open(DATA_STORE+"session_idx.pickle", "wb") as handle:
         pickle.dump(dict(session_idx), handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    with open("data/key_idx.pickle", "wb") as handle:
+    with open(DATA_STORE+"key_idx.pickle", "wb") as handle:
         pickle.dump(dict(key_idx), handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    with open("data/subject_idx.pickle", "wb") as handle:
+    with open(DATA_STORE+"subject_idx.pickle", "wb") as handle:
         pickle.dump(dict(subject_idx), handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    with open("data/processed_stages.pickle", "wb") as handle:
+    with open(DATA_STORE+"processed_stages.pickle", "wb") as handle:
         pickle.dump(processed_stages, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     print("Processing completed successfully!")

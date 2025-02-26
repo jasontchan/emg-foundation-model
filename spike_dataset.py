@@ -26,9 +26,10 @@ class SpikeDataset(Dataset):
         for spike in self.data:
             key = (
                 spike[0].item(),
+                spike[1].item(),
                 spike[-1].item(),
                 spike[-2].item(),
-            )  # (session, gesture, gesture_instance)
+            )  # (session, subject, gesture, gesture_instance)
             if key not in instance_dict:
                 instance_dict[key] = []
             instance_dict[key].append(spike)

@@ -1,4 +1,7 @@
+import gzip
+import os
 import pickle
+import h5py
 from sklearn.model_selection import train_test_split
 import torch
 import torch.nn as nn
@@ -227,26 +230,47 @@ class Trainer:
 
 if __name__ == "__main__":
     embedding_dim = 256
-    with open("data/session_idx.pickle", "rb") as file:
-        session_idx = pickle.load(file)
-    with open("data/key_idx.pickle", "rb") as file:
-        stage_idx = pickle.load(file)
-    with open("data/subject_idx.pickle", "rb") as file:
-        subject_idx = pickle.load(file)
-    with open("data/input_tensor.pickle", "rb") as file:
-        data = pickle.load(file)
+    #need session_idx, stage_idx (key idx), subject_idx, and data
+    DATA_STORE = "full_data/"
+    DATA_BATCH_SIZE = 50
+    NUM_TRAIN_FILES = 200
+    NUM_VAL_FILES = 50
+    if os.path.exists(DATA_STORE + "key_idx.pickle.gz"):
+        with gzip.open(DATA_STORE + "key_idx.pickle.gz", "rb") as f:
+            stage_idx = pickle.load(f)
+    if os.path.exists(DATA_STORE + "session_idx.pickle.gz"):
+        with gzip.open(DATA_STORE + "session_idx.pickle.gz", "rb") as f:
+            session_idx = pickle.load(f)
+    if os.path.exists(DATA_STORE + "subject_idx.pickle.gz"):
+        with gzip.open(DATA_STORE + "subject_idx.pickle.gz", "rb") as f:
+            subject_idx = pickle.load(f)
+    
+    #load train data
+    train_data = torch.tensor([])
+    for i in range(0, NUM_TRAIN_FILES, DATA_BATCH_SIZE):
+        with h5py.File(DATA_STORE + "train_data_batch_"+str(i)+".h5", "r") as hdf5_file:
+            train_batch = list(hdf5_file.keys())[0]
+            batch = torch.tensor(hdf5_file[train_batch][:])
+            train_data = torch.cat((train_data, batch), dim=0)
 
-    print("input tensor", data)
+    #load val data
+    val_data = torch.tensor([])
+    for i in range(0, NUM_VAL_FILES, DATA_BATCH_SIZE):
+        with h5py.File(DATA_STORE + "validation_data_batch_"+str(i)+".h5", "r") as hdf5_file:
+            val_batch = list(hdf5_file.keys())[0]
+            batch = torch.tensor(hdf5_file[val_batch][:])
+            val_data = torch.cat((val_data, batch), dim=0)
+    
+    #NOTE: this is a one-time use case bc val has some subjects who arent in train
+    val_data = val_data[val_data[:, 1] <= 83]
 
-    indices = list(range(len(data)))
-    train_indices, val_indices = train_test_split(indices, test_size=0.2)
-    training_data = data[train_indices]
-    val_data = data[val_indices]
+    train_indices = list(range(len(train_data)))
+    val_indices = list(range(len(val_data)))
     labels = set(stage_idx.values())
     print("STAGE IDX", stage_idx)
 
     # print("training_data", training_data)
-    train_spike_token_data = SpikeDataset(training_data)
+    train_spike_token_data = SpikeDataset(train_data)
     val_spike_token_data = SpikeDataset(val_data)
 
     # sample_item = train_spike_token_data[0]
