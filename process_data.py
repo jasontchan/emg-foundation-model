@@ -2,6 +2,7 @@ import pickle
 import torch
 from infinite_embedding_new import InfiniteVocabEmbedding
 
+#NOTE: made this deprecated im pretty sure. now just run the batch_tokenization.py -> load_train_val_data.py -> train.py
 if __name__ == "__main__":
     embedding_dim = 256
     session_emb_dim = 8

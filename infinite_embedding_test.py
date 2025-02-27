@@ -99,7 +99,7 @@ class InfiniteVocabEmbedding(nn.Module):
             raise ValueError("vocab cannot be a single string")
         elif isinstance(vocab, Iterable):
             # OmegaConf wraps the list in omageconf.listconfig.ListConfig
-            vocab = list(set([self._turn_into_str_rep(token) for token in vocab]))
+            # vocab = list(set([self._turn_into_str_rep(token) for token in vocab]))
             self.vocab = OrderedDict(zip(vocab, range(1, len(vocab) + 1)))
             # print("self.vocab", self.vocab)
             assert "NA" not in self.vocab, "NA is a reserved word"

@@ -22,6 +22,7 @@ class Model(nn.Module):
         latent_dim,
         num_classes,
         dropout=0.1,
+        device=device,
     ):
         super().__init__()
 
@@ -31,13 +32,14 @@ class Model(nn.Module):
         self.num_channels = 32
         self.channel_emb_dim = 16
 
+        self.device = device
+
         # embed session
         self.session_embedding = InfiniteVocabEmbedding(embedding_dim=session_emb_dim).to(device)
         self.session_embedding.load_state_dict(
             torch.load("data/session_vocab_embedding.pt")
         )
         self.session_embedding.extend_vocab("0")  # dk if this is necessary
-        print(self.session_embedding.vocab)
 
         # embed subject
         self.subject_embedding = InfiniteVocabEmbedding(embedding_dim=subject_emb_dim).to(device)
@@ -50,7 +52,7 @@ class Model(nn.Module):
         self.latent_embedding = nn.Embedding(num_latents, embedding_dim=latent_dim).to(device)
 
         inner_dimension = session_emb_dim + subject_emb_dim + self.channel_emb_dim + 2
-        self.projection = nn.Linear(inner_dimension, embedding_dim, dtype=torch.float64)
+        self.projection = nn.Linear(inner_dimension, embedding_dim)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -68,10 +70,10 @@ class Model(nn.Module):
 
         self.class_query = nn.Parameter(torch.randn(embedding_dim))
 
-        self.layer_norm = nn.LayerNorm(embedding_dim, dtype=torch.float64)
+        self.layer_norm = nn.LayerNorm(embedding_dim)
 
         self.readout = nn.Linear(
-            embedding_dim, self.num_classes, dtype=torch.float64
+            embedding_dim, self.num_classes,
         )  # predictions + loss
         self.dim = embedding_dim  # double check d
 
@@ -96,6 +98,8 @@ class Model(nn.Module):
         # output_batch_index
     ):
         sessions = data[:, :, 0]  # [B, seq_len]
+        # print("SESSIONS", sessions)
+        # print("max session", sessions.max())
         session_ids = torch.tensor(
             [
                 [
@@ -105,7 +109,11 @@ class Model(nn.Module):
                 for session_seq in sessions
             ]
         )  # TODO: check this
-        session_ids = session_ids.to(self.session_embedding.weight.device)
+        # print("SESSION IDS", session_ids)
+        # print("session ids shape", session_ids.shape)
+        # print("Max session index:", torch.flatten(session_ids).max().item())  
+
+        session_ids = session_ids.to(self.device)
         subjects = data[:, :, 1]  # [B, seq_len]
         subject_ids = torch.tensor(
             [
@@ -116,7 +124,9 @@ class Model(nn.Module):
                 for subject_seq in subjects
             ]
         )  # TODO: check this
-        subject_ids = subject_ids.to(self.subject_embedding.weight.device)
+        # print("SUBJECT IDs", subject_ids)
+        # print("SUBJECT IDs shape", subject_ids.shape)
+        subject_ids = subject_ids.to(self.device)
         channel_ids = data[
             :, :, 2
         ]  # [B, seq_len] channels and channel ids are the same!
@@ -131,27 +141,43 @@ class Model(nn.Module):
         # print("padding_mask", padding_mask)
         # print("padding mask size", padding_mask.size())
 
-        session_emb = self.session_embedding(session_ids).to(device)
-        subject_emb = self.subject_embedding(subject_ids).to(device)
-        channel_emb = self.channel_embedding(channel_ids.long()).to(device)
+        session_emb = self.session_embedding(session_ids).to(self.device)
+        subject_emb = self.subject_embedding(subject_ids).to(self.device)
+        channel_emb = self.channel_embedding(channel_ids.long()).to(self.device)
+
         # unsqueeze prom and dur so can concat
         prominence = prominence.unsqueeze(-1)
         duration = duration.unsqueeze(-1)
 
+        # print("PROMINENCE", prominence)
+        # print("DURATION", duration)
+        session_emb = session_emb.to(self.device)
+        subject_emb = subject_emb.to(self.device)
+        channel_emb = channel_emb.to(self.device)
+        prominence = prominence.to(self.device)
+        duration = duration.to(self.device)
+
         # COMBINE EVERYTHING SO THEYRE ALL TOGETHER
         inputs = torch.cat(
             [session_emb, subject_emb, channel_emb, prominence, duration], dim=-1
-        ).to(device)
-        inputs = inputs.to(torch.float64)
+        ).to(self.device)
+        # print("INPUTSHERHE", inputs)
+        # print("INPUTSHERHEH shape", inputs.shape)
+        # inputs = inputs.to(torch.float32)
+        # print("INPUTS AFTER TO TORCH 32", inputs)
         inputs = self.projection(inputs)
+        # print("INPUTS AFTER PROJECTION", inputs)
+        # print("INPUTS AFTER PROJECTION SHAPE", inputs.shape)
         inputs = self.dropout(inputs)
+        # print("INPUTS", inputs)
 
-        latent_idx = latent_idx.to(self.latent_embedding.weight.device)
+        latent_idx = latent_idx.to(self.device)
         latents = self.latent_embedding(latent_idx)  # size [n_latents, lat_emb_dim]
         latents = latents.unsqueeze(0).expand(
             batch_size, -1, -1
         )  # size [batch_size, n_latents, lat_emb_dim]
         latent_timestamps = latent_timestamps.unsqueeze(0).expand(batch_size, -1)
+        # print("latent_timestamps", latent_timestamps)
         # # create output queries
         # output_timestamps, output_queries = create_output_queries(
         #     1.0, 1, batch_size, self.embedding_dim #max time 1.0, n_output queries = 1 (classification), b, dim
@@ -159,8 +185,9 @@ class Model(nn.Module):
         output_queries = (
             self.class_query.unsqueeze(0).unsqueeze(1).expand(batch_size, 1, -1)
         )
-        output_timestamps = torch.tensor([1.0 for _ in range(batch_size)]).to(device)
+        output_timestamps = torch.tensor([1.0 for _ in range(batch_size)]).to(self.device)
         output_timestamps = output_timestamps.unsqueeze(1)
+        # print("OUTPUT QUERIES", output_queries)
 
         # run through perceiverIO and return loss
         output_latents = self.perceiver_io(
@@ -177,10 +204,10 @@ class Model(nn.Module):
         )
         output_latents = self.layer_norm(output_latents)
         predictions = self.readout(output_latents).squeeze(1)
-        print("PREDICTIONS", predictions)
+        # print("PREDICTIONS", predictions)
         loss = None
         if labels is not None:
-            print("LABELS", labels)
+            # print("LABELS", labels)
             loss = F.cross_entropy(predictions, labels.long())
 
         return predictions, loss

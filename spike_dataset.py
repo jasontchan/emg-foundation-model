@@ -1,3 +1,5 @@
+from collections import defaultdict
+from operator import itemgetter
 import torch
 from torch.utils.data import Dataset
 import numpy as np
@@ -15,30 +17,22 @@ class SpikeDataset(Dataset):
         ...
         ]
         """
-        self.data = data
+        # self.data = data
         # Group spikes by gesture instance
-        self.gesture_instances = self._group_by_gesture_instance()
+        self.gesture_instances = data
+        print(self.gesture_instances[:5])
 
-    def _group_by_gesture_instance(self) -> List[List]:
-        """Group spikes that belong to the same gesture instance"""
-        instance_dict = {}
-        # create the bins of session + gesture instance
-        for spike in self.data:
-            key = (
-                spike[0].item(),
-                spike[1].item(),
-                spike[-1].item(),
-                spike[-2].item(),
-            )  # (session, subject, gesture, gesture_instance)
-            if key not in instance_dict:
-                instance_dict[key] = []
-            instance_dict[key].append(spike)
-        # put spikes into respective bins (sorted by time)
-        gesture_instances = []
-        for spikes in instance_dict.values():
-            sorted_spikes = sorted(spikes, key=lambda x: x[-3])
-            gesture_instances.append(sorted_spikes)
-        return gesture_instances
+    # def _group_by_gesture_instance(self) -> List[List]:
+    #     """Group spikes that belong to the same gesture instance efficiently."""
+    #     instance_dict = defaultdict(list)
+
+    #     # Group spikes by (session, subject, gesture, gesture_instance)
+    #     for spike in self.data:
+    #         key = (spike[0].item(), spike[1].item(), spike[-1].item(), spike[-2].item())
+    #         instance_dict[key].append(spike)
+
+    #     # Sort spikes in-place for each gesture instance based on time
+    #     return [sorted(spikes, key=itemgetter(-3)) for spikes in instance_dict.values()]
 
     def _normalize_times(self, spikes: List[List]) -> torch.Tensor:
         """0-1 normalization within gesture instance"""
@@ -82,7 +76,7 @@ class SpikeDataset(Dataset):
             sequence_length: Number of spikes in the gesture instance
             label: Gesture label
         """
-        instance_spikes = self.gesture_instances[idx]
+        instance_spikes = torch.tensor(self.gesture_instances[idx])
         # print("raw list", list([spike[1:-3] for spike in instance_spikes]))
         # extract features (everything except session, time, gesture_instance, and gesture)
         # features = torch.stack(
