@@ -20,8 +20,6 @@ class SpikeDataset(Dataset):
         # self.data = data
         # Group spikes by gesture instance
         self.gesture_instances = data
-        print(self.gesture_instances[:5])
-
     # def _group_by_gesture_instance(self) -> List[List]:
     #     """Group spikes that belong to the same gesture instance efficiently."""
     #     instance_dict = defaultdict(list)
@@ -40,6 +38,17 @@ class SpikeDataset(Dataset):
         min_time = times.min()
         max_time = times.max()
         normalized = (times - min_time) / (max_time - min_time + 1e-6)
+        epsilon = 1e-3
+        normalized = normalized * (1 - epsilon) + epsilon #puts in range from [epsilon, 1]
+        return torch.tensor(normalized, dtype=torch.float32)
+    
+    def _normalize_prominences(self, prominences):
+        prominences = np.array(prominences)
+        min_prom = prominences.min()
+        max_prom = prominences.max()
+        normalized = (prominences - min_prom) / (max_prom - min_prom + 1e-6)
+        epsilon = 1e-3
+        normalized = normalized * (1 - epsilon) + epsilon #puts in range from [epsilon, 1]
         return torch.tensor(normalized, dtype=torch.float32)
 
     def _normalize_durations(
@@ -50,6 +59,8 @@ class SpikeDataset(Dataset):
         min_dur = durations.min()
         max_dur = durations.max()
         normalized = (durations - min_dur) / (max_dur - min_dur + 1e-6)
+        epsilon = 1e-3
+        normalized = normalized * (1 - epsilon) + epsilon
         return torch.tensor(normalized, dtype=torch.float32)
 
     def __len__(self) -> int:
@@ -106,6 +117,8 @@ class SpikeDataset(Dataset):
         durations = self._normalize_durations(
             durations
         )  # NOTE: is this not ideal bc outliers will be 1 and force everything to be small yk
+
+        prominences = self._normalize_prominences(prominences) #MAYBE think about a better norm for this?
 
         # Get gesture label (should be same for all spikes in instance)
         gesture = instance_spikes[0][-1]
@@ -209,3 +222,4 @@ class SpikeDataset(Dataset):
             lengths,
             labels,
         )
+    

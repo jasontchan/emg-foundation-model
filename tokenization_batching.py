@@ -16,12 +16,13 @@ from scipy.signal import find_peaks
 import torch
 from infinite_embedding_new import InfiniteVocabEmbedding
 
-DATA_DOWNLOAD_DIR = Path.home()
+# DATA_DOWNLOAD_DIR = Path.home()
 TRAIN = True  # set to False for validation data
-DATA_STORE = "data_2-25-2025/"
+DATA_STORE = "data_3-8-2025/"
 CONFIG_PATH = Path(__file__).parents[1].joinpath("emg2qwerty/config/user/generic.yaml")
-BATCH_SIZE = 50  
-NUM_WORKERS = max(1, cpu_count() // 2)  
+BATCH_SIZE = 50
+NUM_WORKERS = cpu_count() - 6  
+VALID_KEYS = {'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'z', 'x', 'c', 'v', 'b', 'n', 'm'}
 
 def load_training_config(config_path):
     with open(config_path, "r") as file:
@@ -43,11 +44,12 @@ random.shuffle(stages)
 stages = stages  # Limit total number of stages
 processed_stages.update(set(stages))
 
-def init_shared_dicts(shared_session_idx, shared_subject_idx, shared_key_idx, shared_session_counter, shared_subject_counter, shared_key_counter, shared_lock):
-    global session_idx, subject_idx, key_idx, session_counter, subject_counter, key_counter, lock
+def init_shared_dicts(shared_session_idx, shared_subject_idx, shared_key_idx, shared_class_weights, shared_session_counter, shared_subject_counter, shared_key_counter, shared_lock):
+    global session_idx, subject_idx, key_idx, class_weights, session_counter, subject_counter, key_counter, lock
     session_idx = shared_session_idx
     subject_idx = shared_subject_idx
     key_idx = shared_key_idx
+    class_weights = shared_class_weights
     session_counter = shared_session_counter
     subject_counter = shared_subject_counter
     key_counter = shared_key_counter
@@ -74,10 +76,17 @@ def process_stage(stage):
 
     for key_event in keystrokes:
         key = key_event["key"]
+        if key not in VALID_KEYS:
+            continue
         with lock:
             if key not in key_idx:
                 key_idx[key] = key_counter.value
                 key_counter.value += 1
+            #count class weight
+            if key_idx[key] not in class_weights:
+                class_weights[key_idx[key]] = 1
+            else:
+                class_weights[key_idx[key]] += 1
         start_time = key_event["start"]
         end_time = key_event["end"]
         start_index = np.searchsorted(session_timestamps, start_time)
@@ -106,7 +115,7 @@ def process_stage(stage):
                     }
                     for prom, dur, time_occur in zip(properties["prominences"], durations, peak_timestamps - start_time)
                 ])
-                print("LOCAL SPIKES", local_spikes)
+                # print("LOCAL SPIKES", local_spikes)
         key_instances[key] += 1
     return local_spikes
 
@@ -124,12 +133,17 @@ if __name__ == "__main__":
     if os.path.exists(DATA_STORE + "subject_idx.pickle.gz"):
         with gzip.open(DATA_STORE + "subject_idx.pickle.gz", "rb") as f:
             saved_subject_idx = pickle.load(f)
+    if os.path.exists(DATA_STORE + "class_weights.pickle.gz"):
+        with gzip.open(DATA_STORE + "class_weights.pickle.gz", "rb") as f:
+            saved_class_weights = pickle.load(f)
+
 
     if TRAIN:
         manager = Manager()
         session_idx = manager.dict()
         subject_idx = manager.dict()
         key_idx = manager.dict()
+        class_weights = manager.dict()
         
         session_counter = Value('i', 1)  
         subject_counter = Value('i', 1)  
@@ -140,6 +154,7 @@ if __name__ == "__main__":
         session_idx = manager.dict(saved_session_idx)
         subject_idx = manager.dict(saved_subject_idx)
         key_idx = manager.dict(saved_key_idx)
+        class_weights = manager.dict(saved_class_weights)
         session_counter = Value('i', len(saved_session_idx)+1)
         subject_counter = Value('i', len(saved_subject_idx)+1)
         key_counter = Value('i', len(saved_key_idx)+1)
@@ -149,7 +164,7 @@ if __name__ == "__main__":
     for i in range(0, len(stages), BATCH_SIZE):
         batch_stages = stages[i:i + BATCH_SIZE]
 
-        with Pool(NUM_WORKERS, initializer=init_shared_dicts, initargs=(session_idx, subject_idx, key_idx, session_counter, subject_counter, key_counter, lock)) as pool:
+        with Pool(NUM_WORKERS, initializer=init_shared_dicts, initargs=(session_idx, subject_idx, key_idx, class_weights, session_counter, subject_counter, key_counter, lock)) as pool:
             results = pool.map(process_stage, batch_stages)
 
         all_spikes = [spike for sublist in results for spike in sublist]
@@ -166,6 +181,8 @@ if __name__ == "__main__":
             pickle.dump(dict(key_idx), handle, protocol=pickle.HIGHEST_PROTOCOL)
         with gzip.open(DATA_STORE + "subject_idx.pickle.gz", "wb") as handle:
             pickle.dump(dict(subject_idx), handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with gzip.open(DATA_STORE + "class_weights.pickle.gz", "wb") as handle:
+            pickle.dump(dict(class_weights), handle, protocol=pickle.HIGHEST_PROTOCOL)
         with gzip.open(DATA_STORE + "processed_stages.pickle.gz", "wb") as handle:
             pickle.dump(processed_stages, handle, protocol=pickle.HIGHEST_PROTOCOL)
         gc.collect()

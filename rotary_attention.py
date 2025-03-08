@@ -17,14 +17,14 @@ class RotaryCrossAttention(nn.Module):
         self.dropout = dropout
         self.rotate_value = rotate_value
 
-        self.norm = nn.LayerNorm(dim, dtype=torch.float64)
-        self.norm_context = nn.LayerNorm(context_dim, dtype=torch.float64)
+        self.norm = nn.LayerNorm(dim, dtype=torch.float32)
+        self.norm_context = nn.LayerNorm(context_dim, dtype=torch.float32)
 
-        self.to_q = nn.Linear(dim, inner_dim, bias=False, dtype=torch.float64)
+        self.to_q = nn.Linear(dim, inner_dim, bias=False, dtype=torch.float32)
         self.to_kv = nn.Linear(
-            context_dim, inner_dim * 2, bias=False, dtype=torch.float64
+            context_dim, inner_dim * 2, bias=False, dtype=torch.float32
         )
-        self.to_out = nn.Linear(inner_dim, dim, dtype=torch.float64)
+        self.to_out = nn.Linear(inner_dim, dim, dtype=torch.float32)
 
     def forward(
         self,

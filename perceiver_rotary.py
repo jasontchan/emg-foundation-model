@@ -108,20 +108,20 @@ class PerceiverRotary(nn.Module):
         latent_seqlen=None,  # None or (B,)
         output_query_seqlen=None,  # None or (B,)
     ):
-        print("inputs size", inputs.size())  # (B, N_in, dim) or (N_all_in, dim)
-        print("latents size", latents.size())  # (B, N_latent, dim) or (N_all_latent, dim)
-        print("output_queries size", output_queries.size())  # (B, N_out, dim) or (N_all_out, dim)
-        print("input_timestamps size", input_timestamps.size())  # (B, N_in) or (N_all_in,)
-        print("latent_timestamps size", latent_timestamps.size())  # (B, N_latent) or (N_all_latent,)
-        print("output_query_timestamps size", output_query_timestamps.size())  # (B, N_out) or (N_all_out,)
-        print("input_mask size", input_mask.size()) # (B, N_in) or None
+        # print("inputs size", inputs.size())  # (B, N_in, dim) or (N_all_in, dim)
+        # print("latents size", latents.size())  # (B, N_latent, dim) or (N_all_latent, dim)
+        # print("output_queries size", output_queries.size())  # (B, N_out, dim) or (N_all_out, dim)
+        # print("input_timestamps size", input_timestamps.size())  # (B, N_in) or (N_all_in,)
+        # print("latent_timestamps size", latent_timestamps.size())  # (B, N_latent) or (N_all_latent,)
+        # print("output_query_timestamps size", output_query_timestamps.size())  # (B, N_out) or (N_all_out,)
+        # print("input_mask size", input_mask.size()) # (B, N_in) or None
         
         input_timestamp_emb = self.rotary_emb(input_timestamps)
         latent_timestamp_emb = self.rotary_emb(latent_timestamps)
         output_timestamp_emb = self.rotary_emb(output_query_timestamps)
 
-        print("input timestamp embed", input_timestamp_emb.size())
-        print("latent_timestamp_emb", latent_timestamp_emb.size())
+        # print("input timestamp embed", input_timestamp_emb.size())
+        # print("latent_timestamp_emb", latent_timestamp_emb.size())
 
         #NOTE: idk if this is necessary tbh bc do i actually have 4 features like that like no... its just one token
         # input_timestamp_emb = torch.repeat_interleave(
@@ -137,9 +137,9 @@ class PerceiverRotary(nn.Module):
             context_mask=input_mask,
         )
         latents = latents + self.enc_ffn(latents)
-        print(
-            "latents size:", latents.size()
-        )
+        # print(
+        #     "latents size:", latents.size()
+        # )
         # mask = np.ones(tuple(latents.size()), dtype=bool)
         # self attention layers
         for self_attn, self_ff in self.proc_layers:

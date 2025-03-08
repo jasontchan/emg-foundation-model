@@ -6,6 +6,7 @@ from hash_embedding import HashEmbedding
 from perceiver_rotary import PerceiverRotary
 from utilities import create_output_queries
 from infinite_embedding_new import InfiniteVocabEmbedding
+from deepspeed.runtime.zero.partition_parameters import GatheredParameters
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class Model(nn.Module):
@@ -21,6 +22,7 @@ class Model(nn.Module):
         num_latents,
         latent_dim,
         num_classes,
+        emb_directory,
         dropout=0.1,
         device=device,
     ):
@@ -37,14 +39,14 @@ class Model(nn.Module):
         # embed session
         self.session_embedding = InfiniteVocabEmbedding(embedding_dim=session_emb_dim).to(device)
         self.session_embedding.load_state_dict(
-            torch.load("data/session_vocab_embedding.pt")
+            torch.load(emb_directory + "session_vocab_embedding.pt")
         )
         self.session_embedding.extend_vocab("0")  # dk if this is necessary
 
         # embed subject
         self.subject_embedding = InfiniteVocabEmbedding(embedding_dim=subject_emb_dim).to(device)
         self.subject_embedding.load_state_dict(
-            torch.load("data/subject_vocab_embedding.pt")
+            torch.load(emb_directory + "subject_vocab_embedding.pt")
         )
         self.subject_embedding.extend_vocab("0")  # dk if this is necessary
 
@@ -60,7 +62,7 @@ class Model(nn.Module):
             dim=embedding_dim,
             context_dim=embedding_dim,
             dim_head=64,
-            depth=2,
+            depth=2, #was 2
             cross_heads=1,
             self_heads=8,
             ffn_dropout=dropout,

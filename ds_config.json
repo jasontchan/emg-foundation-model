@@ -1,20 +1,19 @@
 {
-    "train_batch_size": 8,
+    "train_batch_size": 512,
+    "train_micro_batch_size_per_gpu": 32,
     "gradient_accumulation_steps": 4,
     "optimizer": {
-      "type": "Adam",
+      "type": "AdamW",
       "params": {
-        "lr": 0.00015
+        "lr": 0.0001,
+        "weight_decay": 0.001
       }
     },
     "fp16": {
       "enabled": false
     },
-    "zero_optimization": {
-  "stage": 2
-},
 "distributed": {
       "enabled": true,
-      "world_size": 1
+      "world_size": 4
     }
   }

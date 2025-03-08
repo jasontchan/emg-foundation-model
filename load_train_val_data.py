@@ -22,17 +22,18 @@ def group_by_gesture_instance(data) -> List[List]:
         # Sort spikes in-place for each gesture instance based on time
         return [sorted(spikes, key=itemgetter(-3)) for spikes in instance_dict.values()]
 
-DATA_STORE = "full_data/"
+DATA_FROM = "data_3-6-2025/"
+DATA_STORE = "data_3-6-2025/"
 DATA_BATCH_SIZE = 50
-NUM_TRAIN_FILES = 200
-NUM_VAL_FILES = 50
+NUM_TRAIN_FILES = 150
+NUM_VAL_FILES = 30
 session_emb_dim = 8
 subject_emb_dim = 8
 #load train data
 train_data = np.empty((0, 8))
 for i in range(0, NUM_TRAIN_FILES, DATA_BATCH_SIZE):
     print("on", i, "batch of train")
-    with h5py.File(DATA_STORE + "train_data_batch_"+str(i)+".h5", "r") as hdf5_file:
+    with h5py.File(DATA_FROM + "train_data_batch_"+str(i)+".h5", "r") as hdf5_file:
         train_batch = list(hdf5_file.keys())[0]
         batch = np.array(hdf5_file[train_batch][:])
         print("train data shape", train_data.shape, "batch shape", batch.shape)
@@ -44,7 +45,7 @@ for i in range(0, NUM_TRAIN_FILES, DATA_BATCH_SIZE):
 val_data = np.empty((0, 8))
 for i in range(0, NUM_VAL_FILES, DATA_BATCH_SIZE):
     print("on", i, "batch of val")
-    with h5py.File(DATA_STORE + "validation_data_batch_"+str(i)+".h5", "r") as hdf5_file:
+    with h5py.File(DATA_FROM + "validation_data_batch_"+str(i)+".h5", "r") as hdf5_file:
         val_batch = list(hdf5_file.keys())[0]
         batch = np.array(hdf5_file[val_batch][:])
         val_data = np.vstack((val_data, batch))
@@ -52,7 +53,8 @@ for i in range(0, NUM_VAL_FILES, DATA_BATCH_SIZE):
 #     file.create_dataset('val_input_tensor', data=val_data, chunks=True, compression='gzip')
 
 #NOTE: this is a one-time use case bc val has some subjects who arent in train
-val_data = val_data[val_data[:, 1] <= 83]
+val_mask = np.isin(val_data[:, 1], train_data[:, 1])
+val_data = val_data[val_mask]
 
 print("starting embedding")
 session_vocab = InfiniteVocabEmbedding(embedding_dim=session_emb_dim)
@@ -61,13 +63,13 @@ print("unique sessions", len(set(sessions)))
 session_vocab.initialize_vocab(list(set(sessions)))
 print("max session embedding index", max(session_vocab.vocab.values()))
 
-torch.save(session_vocab.state_dict(), "data/session_vocab_embedding.pt")
+torch.save(session_vocab.state_dict(), DATA_STORE + "session_vocab_embedding.pt")
 
 subject_vocab = InfiniteVocabEmbedding(embedding_dim=subject_emb_dim)
 subjects = [str(int(spike[1])) for spike in train_data] + [str(int(spike[1])) for spike in val_data]
 subject_vocab.initialize_vocab(list(set(subjects)))
 
-torch.save(subject_vocab.state_dict(), "data/subject_vocab_embedding.pt")
+torch.save(subject_vocab.state_dict(), DATA_STORE + "subject_vocab_embedding.pt")
 print("finishing embedding")
 
 #NOTE: do the group by gesture instance here so its not in the pytorch dataset

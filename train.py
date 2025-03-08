@@ -1,3 +1,4 @@
+import datetime
 import gzip
 import os
 import pickle
@@ -24,7 +25,14 @@ import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 
 def setup_distributed():
-    deepspeed.init_distributed()
+    # deepspeed.init_distributed()
+    timeout = datetime.timedelta(hours=2)
+    # Initialize the process group manually
+    dist.init_process_group(
+        backend="nccl",
+        init_method="env://",
+        timeout=timeout
+    )
     rank = dist.get_rank()  # Unique ID for each GPU (0 to num_gpus-1)
     local_rank = int(os.environ.get("LOCAL_RANK", 0))  # Device index
     torch.cuda.set_device(local_rank)
@@ -40,10 +48,12 @@ class Trainer:
         train_loader,
         val_loader,
         gesture_names,
+        key_idx_mapping,
         learning_rate=1e-4,
         weight_decay=0.01,
         device="cuda" if torch.cuda.is_available() else "cpu",
-        ds_config_path="ds_config.json"
+        ds_config_path="ds_config.json",
+        
         # device="cpu",
     ):
 
@@ -55,6 +65,7 @@ class Trainer:
         self.gesture_names = gesture_names
         self.device = device
         self.ds_config_path = ds_config_path
+        self.idx_key_mapping = {value: key for key, value in key_idx_mapping.items()}
 
         # initialize optimizer
         self.optimizer = optim.AdamW(
@@ -87,8 +98,10 @@ class Trainer:
         all_preds = []
         all_labels = []
         loss_arr = []
+        total_correct = 0
+        total_samples = 0
 
-        progress_bar = tqdm(self.train_loader, desc="Training")
+        progress_bar = tqdm(self.train_loader, desc=f"Training (Epoch {epoch})", disable=(dist.get_rank() != 0))
         
         for (
             sessions,
@@ -114,16 +127,16 @@ class Trainer:
             features = torch.stack(
                 (sessions, subjects, channels, prominences, durations), dim=1
             ).to(self.device)
-            print("FEATURES SHAPE BEFORE TRANSPOSE", features.shape)
+            # print("FEATURES SHAPE BEFORE TRANSPOSE", features.shape)
             features = torch.transpose(features, 1, 2)
-            print("FEATURES SHAPE AFTER TRANSPOSE", features.shape)
+            # print("FEATURES SHAPE AFTER TRANSPOSE", features.shape)
             # zero gradients
             self.optimizer.zero_grad()
 
-            print(f"Feature tensor is on: {features.device}")
+            # print(f"Feature tensor is on: {features.device}")
             # forward pass!
             with torch.cuda.amp.autocast(enabled=False):
-                print("inside with torch.cuda.amp statement")
+                # print("inside with torch.cuda.amp statement")
                 predictions, loss = self.model(
                     data=features,
                     sequence_lengths=lengths,
@@ -133,6 +146,11 @@ class Trainer:
                     labels=labels,
                 )
             loss = loss.to(self.device)
+            # pred_label = torch.argmax(predictions, dim=1)
+            # correct = (pred_label == labels).sum().item()
+            # total_correct += correct
+            # total_samples += labels.size(0)
+            # train_accuracy = correct / labels.size(0)
 
             self.model.backward(loss)
 
@@ -148,10 +166,17 @@ class Trainer:
             all_labels.extend(labels.cpu().numpy())
 
             progress_bar.set_postfix({"loss": f"{loss.item():.4f}"})
-
+        
+        dist.barrier()
+        
         epoch_loss = running_loss / len(self.train_loader)
         epoch_acc = accuracy_score(all_labels, all_preds)
         epoch_f1 = f1_score(all_labels, all_preds, average="weighted")
+
+        with open(MODEL_SAVE_PATH + "model_metrics", "a") as file:
+            file.write("training metrics:")
+            metric_line = "loss: " + str(epoch_loss) + " accuracy: " + str(epoch_acc) + " f1 " + str(epoch_f1) + "\n"
+            file.write(metric_line)
 
         return {"loss": epoch_loss, "accuracy": epoch_acc, "f1": epoch_f1}
 
@@ -211,6 +236,11 @@ class Trainer:
         cm = confusion_matrix(all_labels, all_preds)
         self.plot_confusion_matrix(cm)
 
+        with open(MODEL_SAVE_PATH + "model_metrics", "a") as file:
+            file.write("validation metrics:")
+            metric_line = "loss: " + str(val_loss) + " accuracy: " + str(val_acc) + " f1 " + str(val_f1) + "\n"
+            file.write(metric_line)
+
         return {"loss": val_loss, "accuracy": val_acc, "f1": val_f1}
 
     def plot_confusion_matrix(self, cm):
@@ -220,13 +250,13 @@ class Trainer:
             annot=True,
             fmt="d",
             cmap="Blues",
-            xticklabels=self.gesture_names,
-            yticklabels=self.gesture_names,
+            xticklabels=[self.idx_key_mapping[idx] for idx in self.gesture_names],
+            yticklabels=[self.idx_key_mapping[idx] for idx in self.gesture_names],
         )
         plt.title("Confusion Matrix")
         plt.ylabel("True Label")
         plt.xlabel("Predicted Label")
-        plt.savefig("confusion_mat.png")
+        plt.savefig(MODEL_SAVE_PATH + "confusion_mat.png")
         plt.close()
 
     def plot_train_loss(self, loss_arr):
@@ -235,8 +265,9 @@ class Trainer:
         plt.title("Training Loss")
         plt.ylabel("Loss")
         plt.xlabel("Iteration")
-        plt.savefig("train_loss.png")
+        plt.savefig(MODEL_SAVE_PATH + "train_loss.png")
         plt.close()
+
 
     def plot_val_loss(self, loss_arr):
         plt.figure(figsize=(10, 8))
@@ -244,7 +275,7 @@ class Trainer:
         plt.title("Validation Loss")
         plt.ylabel("Loss")
         plt.xlabel("Epoch")
-        plt.savefig("val_loss.png")
+        plt.savefig(MODEL_SAVE_PATH + "val_loss.png")
         plt.close()
 
     def train(self, n_epochs):
@@ -288,104 +319,71 @@ class Trainer:
 
 
 if __name__ == "__main__":
-    device, local_rank = setup_distributed()
-    print("LOCAL RANK", local_rank)
-    embedding_dim = 256
+    device, rank = setup_distributed()
+    print("LOCAL RANK", rank)
+    embedding_dim = 256 #was 256
     session_emb_dim = 8
     subject_emb_dim = 8
     #need session_idx, stage_idx (key idx), subject_idx, and data
-    DATA_STORE = "full_data/"
-    TRAIN_DATA_PATH = "torch_data/train_data.pt"
-    VAL_DATA_PATH = "torch_data/val_data.pt"
-    TRAIN_SPIKE_DATASET_PATH = "torch_data/train_spike_token_data.pt"
-    VAL_SPIKE_DATASET_PATH = "torch_data/val_spike_token_data.pt"
-    DATA_BATCH_SIZE = 50
-    NUM_TRAIN_FILES = 200
-    NUM_VAL_FILES = 50
-    DATA_FRESH = False
+    DATA_STORE = "data_3-6-2025/"
+    # TRAIN_DATA_PATH = "torch_data/train_data.pt"
+    # VAL_DATA_PATH = "torch_data/val_data.pt"
+    # TRAIN_SPIKE_DATASET_PATH = "torch_data/train_spike_token_data.pt"
+    # VAL_SPIKE_DATASET_PATH = "torch_data/val_spike_token_data.pt"
+    MODEL_SAVE_PATH = "3-6-2025/"
+    # DATA_BATCH_SIZE = 50
+    # NUM_TRAIN_FILES = 200
+    # NUM_VAL_FILES = 50
+    # DATA_FRESH = False
     stage_idx = {}
     session_idx = {}
     subject_idx = {}
     train_data = None
     val_data = None
+    device = torch.cuda.current_device()
+    print(f"PyTorch sees {torch.cuda.device_count()} GPUs")
+    print(f"Current CUDA device: {torch.cuda.current_device()}")
+    print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
     
-    if local_rank == 0:
+    if rank == 0:
         if os.path.exists(DATA_STORE + "key_idx.pickle.gz"):
             with gzip.open(DATA_STORE + "key_idx.pickle.gz", "rb") as f:
                 stage_idx = pickle.load(f)
-                print("SUCCESS", local_rank)
+                print("SUCCESS", rank)
         if os.path.exists(DATA_STORE + "session_idx.pickle.gz"):
             with gzip.open(DATA_STORE + "session_idx.pickle.gz", "rb") as f:
                 session_idx = pickle.load(f)
-                print("SUCCESS", local_rank)
+                print("SUCCESS", rank)
         if os.path.exists(DATA_STORE + "subject_idx.pickle.gz"):
             with gzip.open(DATA_STORE + "subject_idx.pickle.gz", "rb") as f:
                 subject_idx = pickle.load(f)
-                print("SUCCESS", local_rank)
+                print("SUCCESS", rank)
         
-        dist.barrier()
-        obj_list = [stage_idx, session_idx, subject_idx]
-        dist.broadcast_object_list(obj_list, src=0)
-        stage_idx, session_idx, subject_idx = obj_list 
-        print("BROADCASTED EVERTHING", local_rank)
         
-        labels = set(stage_idx.values())
+    obj_list = [stage_idx, session_idx, subject_idx]
+    dist.broadcast_object_list(obj_list, src=0)
+    stage_idx, session_idx, subject_idx = obj_list 
+        
+    print("BROADCASTED EVERTHING", rank)
+    dist.barrier()
+    labels = set(stage_idx.values())
 
-    if local_rank == 0:
-        train_dataset_input = []
-
-        with h5py.File(DATA_STORE + "train_input_tensor.h5", "r") as file:
-            num_sublists = file.attrs["num_sublists"]
-            for i in range(num_sublists):
-                train_dataset_input.append(file[f"sublist_{i}"][:])  # Load entire 2D array
-        # # torch.save(train_data, TRAIN_DATA_PATH) #the tensor of all train data
-
-        val_dataset_input = []
-
-        with h5py.File(DATA_STORE + "val_input_tensor.h5", "r") as file:
-            num_sublists = file.attrs["num_sublists"]
-            for i in range(num_sublists):
-                val_dataset_input.append(file[f"sublist_{i}"][:])  # Load entire 2D array
-        # # torch.save(val_data, VAL_DATA_PATH) #the tensor of all val data
-        # with open(DATA_STORE + "train_input_tensor.pickle", "rb") as f:
-        #     data = quickle.loads(f.read())
-        # with open(DATA_STORE + "val_input_tensor.pickle", "rb") as f:
-        #     data = quickle.loads(f.read())
-        # train_dataset_input = np.load("train_input_tensor.npy", mmap_mode="r")
-        # val_dataset_input = np.load("val_input_tensor.npy", mmap_mode="r")
-        # train_dataset_input = joblib.load(DATA_STORE + "train_input_tensor.pickle")
-        # val_dataset_input = joblib.load(DATA_STORE + "val_input_tensor.pickle")
-
-    # dist.barrier()
-
-    # dataset_sizes = [0, 0]
     # if local_rank == 0:
-    #     dataset_sizes = [len(train_data), len(val_data)]
+    train_dataset_input = []
 
-    # dataset_sizes = torch.tensor(dataset_sizes, dtype=torch.long, device=device)
-    # dist.broadcast(dataset_sizes, src=0)
+    with h5py.File(DATA_STORE + "train_input_tensor.h5", "r") as file:
+        num_sublists = file.attrs["num_sublists"]
+        for i in range(num_sublists):
+            train_dataset_input.append(file[f"sublist_{i}"][:])  # Load entire 2D array
+    # # torch.save(train_data, TRAIN_DATA_PATH) #the tensor of all train data
 
-    # train_size, val_size = dataset_sizes.tolist()
+    val_dataset_input = []
 
-    # # ✅ Instead of loading the full dataset, load only the relevant subset
-    # def load_dataset_subset(data_path, total_size, rank, world_size):
-    #     """Loads only the subset of the dataset assigned to this rank"""
-    #     num_samples_per_rank = total_size // world_size
-    #     start_idx = rank * num_samples_per_rank
-    #     end_idx = start_idx + num_samples_per_rank
-
-    #     # Load dataset in a memory-efficient way
-    #     full_data = torch.load(data_path, map_location="cpu")
-    #     subset_data = full_data[start_idx:end_idx]
-    #     del full_data  # ✅ Free memory
-    #     return subset_data
-
-    # # ✅ Each rank loads **only its assigned subset** from disk
-    # print("load dataset subset")
-    # train_data = load_dataset_subset(TRAIN_DATA_PATH, train_size, local_rank, dist.get_world_size())
-    # val_data = load_dataset_subset(VAL_DATA_PATH, val_size, local_rank, dist.get_world_size())
-
-    # ✅ Now create `SpikeDataset` with only the assigned subset
+    with h5py.File(DATA_STORE + "val_input_tensor.h5", "r") as file:
+        num_sublists = file.attrs["num_sublists"]
+        for i in range(num_sublists):
+            val_dataset_input.append(file[f"sublist_{i}"][:])  # Load entire 2D array
+        
     print("create SpikeDataset train")
     train_spike_token_data = SpikeDataset(train_dataset_input)
     print("Length of train_spike_token_data", len(train_spike_token_data))
@@ -395,8 +393,10 @@ if __name__ == "__main__":
 
     # ✅ Create `DistributedSampler` on **every rank** (not just rank 0)
     print("create distributed sampler")
-    train_sampler = DistributedSampler(train_spike_token_data, num_replicas=dist.get_world_size(), rank=local_rank)
-    val_sampler = DistributedSampler(val_spike_token_data, num_replicas=dist.get_world_size(), rank=local_rank)
+    print(f"Rank {dist.get_rank()} - Total dataset size: {len(train_spike_token_data)}")
+    train_sampler = DistributedSampler(train_spike_token_data, num_replicas=dist.get_world_size(), rank=rank, drop_last=True)
+    val_sampler = DistributedSampler(val_spike_token_data, num_replicas=dist.get_world_size(), rank=rank, drop_last=True)
+    print(f"Rank {dist.get_rank()} - Number of samples assigned: {len(train_sampler)}")
 
     # ✅ Each rank gets its subset of data
     print("create dataloader train")
@@ -404,8 +404,10 @@ if __name__ == "__main__":
         dataset=train_spike_token_data,
         batch_size=32,
         sampler=train_sampler,
-        num_workers=4,
+        num_workers=16, #was 4
         pin_memory=True,
+        persistent_workers=True,
+        drop_last=True,
         collate_fn=SpikeDataset.collate_fn
     )
     print("create dataloader val")
@@ -413,8 +415,10 @@ if __name__ == "__main__":
         dataset=val_spike_token_data,
         batch_size=32,
         sampler=val_sampler,
-        num_workers=4,
+        num_workers=16, #was 4
         pin_memory=True,
+        persistent_workers=True,
+        drop_last=True,
         collate_fn=SpikeDataset.collate_fn
     )
 
@@ -441,31 +445,33 @@ if __name__ == "__main__":
     #     collate_fn=SpikeDataset.collate_fn,
     # )
     # need parameters 'num_embeddings', 'embedding_dim', 'num_buckets', 'num_latents', and 'latent_dim'
-    print("creating model", local_rank)
+    print("creating model", rank)
     print("NUM CLASSES (len(list(stage_idx.values())))", len(list(stage_idx.values())))
     model = Model(
         embedding_dim=embedding_dim,
         session_emb_dim=8,
         subject_emb_dim=8,
-        num_latents=256,
-        latent_dim=256,
+        num_latents=256, #was 256
+        latent_dim=256, #was 256
         num_classes=len(list(stage_idx.values())),
+        emb_directory=DATA_STORE,
         device=device,
     ).to(device)
     # model.double()
     # Initialize trainer
-    print("init trainer", local_rank)
+    print("init trainer", rank)
     trainer = Trainer(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
         gesture_names=list(stage_idx.values()),
         learning_rate=1e-4,
-        weight_decay=0.01,
+        weight_decay=1e-3,
+        key_idx_mapping=stage_idx
     )
 
     # Train model
-    print("training", local_rank)
+    print("training", rank)
     trainer.train(n_epochs=20)
 
     # Make predictions
