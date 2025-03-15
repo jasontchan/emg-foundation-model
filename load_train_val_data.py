@@ -11,22 +11,20 @@ import torch
 from infinite_embedding_test import InfiniteVocabEmbedding
 
 def group_by_gesture_instance(data) -> List[List]:
-        """Group spikes that belong to the same gesture instance efficiently."""
         instance_dict = defaultdict(list)
 
-        # Group spikes by (session, subject, gesture, gesture_instance)
         for spike in data:
             key = (spike[0].item(), spike[1].item(), spike[-1].item(), spike[-2].item())
             instance_dict[key].append(spike)
 
-        # Sort spikes in-place for each gesture instance based on time
+        # sort spikes in-place for each gesture instance based on time
         return [sorted(spikes, key=itemgetter(-3)) for spikes in instance_dict.values()]
 
-DATA_FROM = "data_3-6-2025/"
-DATA_STORE = "data_3-6-2025/"
+DATA_FROM = "data_3-12-2025/"
+DATA_STORE = "data_3-12-2025/"
 DATA_BATCH_SIZE = 50
-NUM_TRAIN_FILES = 150
-NUM_VAL_FILES = 30
+NUM_TRAIN_FILES = 350
+NUM_VAL_FILES = 100
 session_emb_dim = 8
 subject_emb_dim = 8
 #load train data
@@ -52,7 +50,7 @@ for i in range(0, NUM_VAL_FILES, DATA_BATCH_SIZE):
 # with h5py.File(DATA_STORE + 'val_input_tensor.h5', 'w') as file:
 #     file.create_dataset('val_input_tensor', data=val_data, chunks=True, compression='gzip')
 
-#NOTE: this is a one-time use case bc val has some subjects who arent in train
+#val has some subjects who arent in train
 val_mask = np.isin(val_data[:, 1], train_data[:, 1])
 val_data = val_data[val_mask]
 
@@ -83,9 +81,7 @@ with h5py.File(DATA_STORE + "train_input_tensor.h5", "w") as file:
     for i, sublist in enumerate(train_dataset_input):
         sublist_array = np.stack(sublist)  # Convert list of arrays to a 2D NumPy array
         file.create_dataset(f"sublist_{i}", data=sublist_array, dtype=np.float32)
-# with open(DATA_STORE + "train_input_tensor.pickle", "wb") as handle:
-#     pickle.dump(train_dataset_input, handle, protocol=pickle.HIGHEST_PROTOCOL)
-# np.save("train_input_tensor.npy", train_dataset_input)
+
 
 print("FINISHED SAVING TRAIN DATA NOW GROUPING VAL")
 val_dataset_input = group_by_gesture_instance(val_data)
@@ -97,8 +93,5 @@ with h5py.File(DATA_STORE + "val_input_tensor.h5", "w") as file:
     for i, sublist in enumerate(val_dataset_input):
         sublist_array = np.stack(sublist)  # Convert list of arrays to a 2D NumPy array
         file.create_dataset(f"sublist_{i}", data=sublist_array, dtype=np.float32)
-# with open(DATA_STORE + "val_input_tensor.pickle", "wb") as handle:
-#     pickle.dump(val_dataset_input, handle, protocol=pickle.HIGHEST_PROTOCOL)
-# np.save("val_input_tensor.npy", val_dataset_input)
 
 print("DONE")

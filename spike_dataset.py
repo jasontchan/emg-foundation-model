@@ -18,19 +18,8 @@ class SpikeDataset(Dataset):
         ]
         """
         # self.data = data
-        # Group spikes by gesture instance
         self.gesture_instances = data
-    # def _group_by_gesture_instance(self) -> List[List]:
-    #     """Group spikes that belong to the same gesture instance efficiently."""
-    #     instance_dict = defaultdict(list)
-
-    #     # Group spikes by (session, subject, gesture, gesture_instance)
-    #     for spike in self.data:
-    #         key = (spike[0].item(), spike[1].item(), spike[-1].item(), spike[-2].item())
-    #         instance_dict[key].append(spike)
-
-    #     # Sort spikes in-place for each gesture instance based on time
-    #     return [sorted(spikes, key=itemgetter(-3)) for spikes in instance_dict.values()]
+        
 
     def _normalize_times(self, spikes: List[List]) -> torch.Tensor:
         """0-1 normalization within gesture instance"""
@@ -88,6 +77,7 @@ class SpikeDataset(Dataset):
             label: Gesture label
         """
         instance_spikes = torch.tensor(self.gesture_instances[idx])
+        # instance_spikes = instance_spikes.half()
         # print("raw list", list([spike[1:-3] for spike in instance_spikes]))
         # extract features (everything except session, time, gesture_instance, and gesture)
         # features = torch.stack(
@@ -135,39 +125,9 @@ class SpikeDataset(Dataset):
             gesture.clone().detach(),
         )
 
-    # @staticmethod
-    # def collate_fn(batch):
-    #     """Custom collate function to handle variable length sequences"""
-    #     # print("BATCH", batch)
-    #     features, timestamps, lengths, labels = zip(*batch)
-
-    #     max_len = max(len(f) for f in features)
-
-    #     # pad features
-    #     padded_features = torch.zeros(len(features), max_len, features[0].size(-1))
-
-    #     for i, f in enumerate(features):
-    #         padded_features[i, : len(f)] = f
-
-    #     # pad timestamps
-    #     padded_timestamps = torch.zeros(len(timestamps), max_len)
-    #     for i, t in enumerate(timestamps):
-    #         padded_timestamps[i, : len(t)] = t
-
-    #     # stack lengths and labels
-    #     lengths = torch.stack(lengths)
-    #     labels = torch.stack(labels)
-
-    #     return (
-    #         padded_features,
-    #         padded_timestamps,
-    #         lengths,
-    #         labels
-    #     )
 
     @staticmethod
     def collate_fn(batch):
-        """Custom collate function to handle variable length sequences"""
         # print("BATCH", batch)
         (
             sessions,

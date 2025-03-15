@@ -38,9 +38,9 @@ def setup_distributed():
     torch.cuda.set_device(local_rank)
     device = torch.device("cuda", local_rank)
     return device, rank
-torch.autograd.set_detect_anomaly(True)
+# torch.autograd.set_detect_anomaly(True)
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+scaler = torch.cuda.amp.GradScaler()
 class Trainer:
     def __init__(
         self,
@@ -50,7 +50,7 @@ class Trainer:
         gesture_names,
         key_idx_mapping,
         learning_rate=1e-4,
-        weight_decay=0.01,
+        weight_decay=0.001,
         device="cuda" if torch.cuda.is_available() else "cpu",
         ds_config_path="ds_config.json",
         
@@ -60,6 +60,7 @@ class Trainer:
         # set member variables
         self.device = device
         self.model = model.to(self.device)
+        # self.model.half()
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.gesture_names = gesture_names
@@ -154,8 +155,11 @@ class Trainer:
 
             self.model.backward(loss)
 
+            # scaler.scale(loss).backward()
+            # scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-
+            # scaler.step(self.optimizer)
+            # scaler.update()
             self.model.step()
 
             running_loss += loss.item()
@@ -317,20 +321,25 @@ class Trainer:
     def predict(self):
         pass
 
+def load_if_exists(filepath):
+    if os.path.exists(filepath):
+        with gzip.open(filepath, "rb") as f:
+            return pickle.load(f)
+    return None
 
 if __name__ == "__main__":
     device, rank = setup_distributed()
     print("LOCAL RANK", rank)
-    embedding_dim = 256 #was 256
+    embedding_dim = 196 #was 256
     session_emb_dim = 8
     subject_emb_dim = 8
     #need session_idx, stage_idx (key idx), subject_idx, and data
-    DATA_STORE = "data_3-6-2025/"
+    DATA_STORE = "data_3-8-2025/"
     # TRAIN_DATA_PATH = "torch_data/train_data.pt"
     # VAL_DATA_PATH = "torch_data/val_data.pt"
     # TRAIN_SPIKE_DATASET_PATH = "torch_data/train_spike_token_data.pt"
     # VAL_SPIKE_DATASET_PATH = "torch_data/val_spike_token_data.pt"
-    MODEL_SAVE_PATH = "3-6-2025/"
+    MODEL_SAVE_PATH = "3-14-2025/"
     # DATA_BATCH_SIZE = 50
     # NUM_TRAIN_FILES = 200
     # NUM_VAL_FILES = 50
@@ -368,13 +377,12 @@ if __name__ == "__main__":
     dist.barrier()
     labels = set(stage_idx.values())
 
-    # if local_rank == 0:
     train_dataset_input = []
 
     with h5py.File(DATA_STORE + "train_input_tensor.h5", "r") as file:
         num_sublists = file.attrs["num_sublists"]
         for i in range(num_sublists):
-            train_dataset_input.append(file[f"sublist_{i}"][:])  # Load entire 2D array
+            train_dataset_input.append(file[f"sublist_{i}"][:]) 
     # # torch.save(train_data, TRAIN_DATA_PATH) #the tensor of all train data
 
     val_dataset_input = []
@@ -382,7 +390,7 @@ if __name__ == "__main__":
     with h5py.File(DATA_STORE + "val_input_tensor.h5", "r") as file:
         num_sublists = file.attrs["num_sublists"]
         for i in range(num_sublists):
-            val_dataset_input.append(file[f"sublist_{i}"][:])  # Load entire 2D array
+            val_dataset_input.append(file[f"sublist_{i}"][:])  
         
     print("create SpikeDataset train")
     train_spike_token_data = SpikeDataset(train_dataset_input)
@@ -391,18 +399,16 @@ if __name__ == "__main__":
     val_spike_token_data = SpikeDataset(val_dataset_input)
     print("Length of val_spike_token_data", len(val_spike_token_data))
 
-    # ✅ Create `DistributedSampler` on **every rank** (not just rank 0)
     print("create distributed sampler")
     print(f"Rank {dist.get_rank()} - Total dataset size: {len(train_spike_token_data)}")
     train_sampler = DistributedSampler(train_spike_token_data, num_replicas=dist.get_world_size(), rank=rank, drop_last=True)
     val_sampler = DistributedSampler(val_spike_token_data, num_replicas=dist.get_world_size(), rank=rank, drop_last=True)
     print(f"Rank {dist.get_rank()} - Number of samples assigned: {len(train_sampler)}")
 
-    # ✅ Each rank gets its subset of data
     print("create dataloader train")
     train_loader = DataLoader(
         dataset=train_spike_token_data,
-        batch_size=32,
+        batch_size=16,
         sampler=train_sampler,
         num_workers=16, #was 4
         pin_memory=True,
@@ -413,7 +419,7 @@ if __name__ == "__main__":
     print("create dataloader val")
     val_loader = DataLoader(
         dataset=val_spike_token_data,
-        batch_size=32,
+        batch_size=16,
         sampler=val_sampler,
         num_workers=16, #was 4
         pin_memory=True,
@@ -425,7 +431,8 @@ if __name__ == "__main__":
     # ✅ Barrier before training starts
     torch.distributed.barrier()
 
-    
+    #load class weights
+    class_weights = load_if_exists(DATA_STORE + "class_weights.pickle.gz")
 
     # # print("amount of data in training", len(train_spike_token_data))
     # train_sampler = DistributedSampler(train_spike_token_data)
@@ -452,8 +459,9 @@ if __name__ == "__main__":
         session_emb_dim=8,
         subject_emb_dim=8,
         num_latents=256, #was 256
-        latent_dim=256, #was 256
+        latent_dim=196, #was 256
         num_classes=len(list(stage_idx.values())),
+        class_weights_dict=class_weights,
         emb_directory=DATA_STORE,
         device=device,
     ).to(device)
@@ -466,7 +474,7 @@ if __name__ == "__main__":
         val_loader=val_loader,
         gesture_names=list(stage_idx.values()),
         learning_rate=1e-4,
-        weight_decay=1e-3,
+        weight_decay=0.001,
         key_idx_mapping=stage_idx
     )
 

@@ -17,8 +17,8 @@ import torch
 from infinite_embedding_new import InfiniteVocabEmbedding
 
 # DATA_DOWNLOAD_DIR = Path.home()
-TRAIN = True  # set to False for validation data
-DATA_STORE = "data_3-8-2025/"
+TRAIN = False  # set to False for validation data
+DATA_STORE = "data_3-14-2025/"
 CONFIG_PATH = Path(__file__).parents[1].joinpath("emg2qwerty/config/user/generic.yaml")
 BATCH_SIZE = 50
 NUM_WORKERS = cpu_count() - 6  
@@ -41,7 +41,7 @@ proc_path = DATA_STORE + "processed_stages.pickle.gz"
 processed_stages = load_if_exists(proc_path) or set()
 random.seed(0)
 random.shuffle(stages)
-stages = stages  # Limit total number of stages
+stages = stages[:50]  # Limit total number of stages
 processed_stages.update(set(stages))
 
 def init_shared_dicts(shared_session_idx, shared_subject_idx, shared_key_idx, shared_class_weights, shared_session_counter, shared_subject_counter, shared_key_counter, shared_lock):
@@ -107,8 +107,8 @@ def process_stage(stage):
                         "session": session_idx[session_name],
                         "subject": subject_idx[subject],
                         "channel": (channel_idx + 1)+16 if hand_flag else (channel_idx + 1),
-                        "prominence": round(prom, 1),
-                        "duration": round(dur, 2),
+                        "prominence": round(prom), #changed to int rounding
+                        "duration": round(dur, 1), #changed to 1 place round
                         "time": time_occur,
                         "instance": key_instances[key],
                         "gesture": key_idx[key],
@@ -186,4 +186,4 @@ if __name__ == "__main__":
         with gzip.open(DATA_STORE + "processed_stages.pickle.gz", "wb") as handle:
             pickle.dump(processed_stages, handle, protocol=pickle.HIGHEST_PROTOCOL)
         gc.collect()
-    print("Processing completed successfully!")
+    print("processing completed successfully!")

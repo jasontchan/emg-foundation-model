@@ -22,6 +22,7 @@ class Model(nn.Module):
         num_latents,
         latent_dim,
         num_classes,
+        class_weights_dict,
         emb_directory,
         dropout=0.1,
         device=device,
@@ -34,6 +35,9 @@ class Model(nn.Module):
         self.num_channels = 32
         self.channel_emb_dim = 16
 
+        self.class_weights = torch.tensor([1/val for key, val in class_weights_dict.items()], dtype=torch.float16).to(device)
+        self.class_weights /= self.class_weights.sum()
+
         self.device = device
 
         # embed session
@@ -41,20 +45,20 @@ class Model(nn.Module):
         self.session_embedding.load_state_dict(
             torch.load(emb_directory + "session_vocab_embedding.pt")
         )
-        self.session_embedding.extend_vocab("0")  # dk if this is necessary
+        self.session_embedding.extend_vocab("0")  
 
         # embed subject
         self.subject_embedding = InfiniteVocabEmbedding(embedding_dim=subject_emb_dim).to(device)
         self.subject_embedding.load_state_dict(
             torch.load(emb_directory + "subject_vocab_embedding.pt")
         )
-        self.subject_embedding.extend_vocab("0")  # dk if this is necessary
+        self.subject_embedding.extend_vocab("0")  
 
         self.channel_embedding = nn.Embedding(self.num_channels+1, embedding_dim=self.channel_emb_dim).to(device)
         self.latent_embedding = nn.Embedding(num_latents, embedding_dim=latent_dim).to(device)
 
         inner_dimension = session_emb_dim + subject_emb_dim + self.channel_emb_dim + 2
-        self.projection = nn.Linear(inner_dimension, embedding_dim)
+        self.projection = nn.Linear(inner_dimension, embedding_dim, dtype=torch.float16)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -125,7 +129,7 @@ class Model(nn.Module):
                 ]
                 for subject_seq in subjects
             ]
-        )  # TODO: check this
+        ) 
         # print("SUBJECT IDs", subject_ids)
         # print("SUBJECT IDs shape", subject_ids.shape)
         subject_ids = subject_ids.to(self.device)
@@ -163,6 +167,7 @@ class Model(nn.Module):
         inputs = torch.cat(
             [session_emb, subject_emb, channel_emb, prominence, duration], dim=-1
         ).to(self.device)
+        inputs = inputs.half()
         # print("INPUTSHERHE", inputs)
         # print("INPUTSHERHEH shape", inputs.shape)
         # inputs = inputs.to(torch.float32)
@@ -210,7 +215,7 @@ class Model(nn.Module):
         loss = None
         if labels is not None:
             # print("LABELS", labels)
-            loss = F.cross_entropy(predictions, labels.long())
+            loss = F.cross_entropy(predictions.float(), labels.long(), weight=self.class_weights.float(), label_smoothing=0.05)
 
         return predictions, loss
 

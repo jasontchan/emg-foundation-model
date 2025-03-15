@@ -123,10 +123,6 @@ class PerceiverRotary(nn.Module):
         # print("input timestamp embed", input_timestamp_emb.size())
         # print("latent_timestamp_emb", latent_timestamp_emb.size())
 
-        #NOTE: idk if this is necessary tbh bc do i actually have 4 features like that like no... its just one token
-        # input_timestamp_emb = torch.repeat_interleave(
-        #     input_timestamp_emb, repeats=4, dim=1
-        # )
 
         # encoding attention
         latents = latents + self.enc_atn(
